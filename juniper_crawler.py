@@ -10,6 +10,8 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from netaddr import IPNetwork
 import time
+import queue
+import threading
 
 import oui_lookup
 import juniper_parser
@@ -40,7 +42,7 @@ def check_nmap_installed():
     except FileNotFoundError:
         return False
 
-def run_nmap_scan(subnets):
+def run_nmap_scan_producer(subnets, discovered_queue, scanning_complete_event):
     targets = " ".join(subnets)
     xml_output = "nmap_results_juniper.xml"
     print(f"Running Nmap scan on target subnets: {targets}")
@@ -51,10 +53,14 @@ def run_nmap_scan(subnets):
             print("Non-root environment detected. Falling back to Nmap TCP Connect scan (-sT)...")
             cmd = ["nmap", "-sT", "-p", "22,23", "-Pn", "-oX", xml_output] + subnets
             subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
+        
+        hosts = parse_nmap_xml(xml_output)
+        for h in hosts:
+            discovered_queue.put(h)
+    except Exception as e:
         print(f"Nmap scan failed: {e}")
-        return []
-    return parse_nmap_xml(xml_output)
+    finally:
+        scanning_complete_event.set()
 
 def parse_nmap_xml(xml_file):
     hosts = []
@@ -102,28 +108,43 @@ def python_port_scan_worker(ip, ports):
         return {"ip": ip, "mac": "", "ports": open_ports}
     return None
 
-def run_python_port_scan(subnets):
+def run_python_port_scan_producer(subnets, discovered_queue, scanning_complete_event):
     print("Nmap not found. Falling back to internal Python multi-threaded port scanner...")
-    discovered = []
-    ips_to_scan = []
-    for subnet in subnets:
-        try:
-            net = IPNetwork(subnet)
-            if net.prefixlen < 31:
-                ips_to_scan.extend([str(ip) for ip in list(net)[1:-1]])
-            else:
-                ips_to_scan.extend([str(ip) for ip in list(net)])
-        except Exception as e:
-            print(f"Invalid subnet range ignored: {subnet} ({e})")
-    print(f"Scanning {len(ips_to_scan)} IP addresses on ports 22 and 23...")
+    max_active_futures = 500
+    futures = set()
+    
     with ThreadPoolExecutor(max_workers=50) as executor:
-        futures = {executor.submit(python_port_scan_worker, ip, [22, 23]): ip for ip in ips_to_scan}
-        for future in as_completed(futures):
-            res = future.result()
+        for subnet in subnets:
+            try:
+                net = IPNetwork(subnet)
+                hosts_iter = net.iter_hosts() if net.prefixlen < 31 else iter(net)
+                
+                for ip in hosts_iter:
+                    ip_str = str(ip)
+                    # Cap outstanding futures to avoid memory issues
+                    while len(futures) >= max_active_futures:
+                        completed = {f for f in futures if f.done()}
+                        for f in completed:
+                            res = f.result()
+                            if res:
+                                discovered_queue.put(res)
+                                print(f"  Discovered active host: {res['ip']} (Open ports: {res['ports']})")
+                        futures -= completed
+                        time.sleep(0.01)
+                    
+                    futures.add(executor.submit(python_port_scan_worker, ip_str, [22, 23]))
+                    
+            except Exception as e:
+                print(f"Invalid subnet range ignored: {subnet} ({e})")
+        
+        # Wait for all remaining futures to complete
+        for f in as_completed(futures):
+            res = f.result()
             if res:
-                discovered.append(res)
+                discovered_queue.put(res)
                 print(f"  Discovered active host: {res['ip']} (Open ports: {res['ports']})")
-    return discovered
+                
+    scanning_complete_event.set()
 
 def connect_to_device(ip, username, password, conn_type="ssh"):
     from netmiko import ConnectHandler
@@ -272,7 +293,10 @@ def main():
     if not os.path.exists(oui_lookup.OUI_FILE):
         oui_lookup.download_oui_db()
 
-    targets = []
+    discovered_queue = queue.Queue()
+    scanning_complete_event = threading.Event()
+    targets_loaded_directly = False
+
     if args.retry:
         if not os.path.exists(args.retry):
             print(f"Error: Retry file {args.retry} does not exist.")
@@ -283,7 +307,9 @@ def main():
                 targets_ips = failed_data.get("failed_ips", [])
                 print(f"Loaded {len(targets_ips)} failed hosts from {args.retry} for retry.")
                 for ip in targets_ips:
-                    targets.append({"ip": ip, "mac": "", "ports": [22, 23]})
+                    discovered_queue.put({"ip": ip, "mac": "", "ports": [22, 23]})
+                scanning_complete_event.set()
+                targets_loaded_directly = True
         except Exception as e:
             print(f"Error reading retry file: {e}")
             sys.exit(1)
@@ -308,50 +334,86 @@ def main():
             print("No valid target subnets to scan. Exiting.")
             sys.exit(1)
 
-        print("\n--- Phase 1: Subnet Discovery ---")
+        print("\n--- Phase 1: Subnet Discovery (Running in Background) ---")
         if check_nmap_installed():
-            targets = run_nmap_scan(valid_subnets)
+            scanner_thread = threading.Thread(
+                target=run_nmap_scan_producer,
+                args=(valid_subnets, discovered_queue, scanning_complete_event)
+            )
         else:
-            targets = run_python_port_scan(valid_subnets)
+            scanner_thread = threading.Thread(
+                target=run_python_port_scan_producer,
+                args=(valid_subnets, discovered_queue, scanning_complete_event)
+            )
+        scanner_thread.daemon = True
+        scanner_thread.start()
 
-        print(f"Discovered {len(targets)} active hosts with open SSH/Telnet ports.")
-        if not targets:
-            print("No switch management ports (22/23) found. Exiting.")
-            sys.exit(1)
+    # Wait for the first host to be discovered (or scanning to complete if nothing found)
+    if not targets_loaded_directly:
+        print("Scanning and waiting for the first active host to be discovered...")
+    
+    first_host = None
+    while not scanning_complete_event.is_set() or not discovered_queue.empty():
+        try:
+            first_host = discovered_queue.get(timeout=0.1)
+            break
+        except queue.Empty:
+            continue
 
+    if not first_host:
+        print("No switch management ports (22/23) found. Exiting.")
+        sys.exit(1)
+
+    print(f"\n[✓] Discovered active host: {first_host['ip']} (Open ports: {first_host['ports']})")
     print("\n--- Phase 2: Credentials Input ---")
     username = input("Enter SSH/Telnet username: ").strip()
     password = getpass.getpass("Enter password: ")
 
-    print("\n--- Phase 3: Switch Discovery Crawl ---")
+    print("\n--- Phase 3: Switch Discovery Crawl (Concurrently scanning in background) ---")
     scanned_devices = {}
     failed_devices = []
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join("outputs", f"juniper_run_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {
-            executor.submit(
-                crawl_device,
-                t["ip"],
-                t["ports"],
-                username,
-                password,
-                timestamp
-            ): t for t in targets
-        }
-        for future in as_completed(futures):
-            res, dev_run_dir = future.result()
-            if dev_run_dir: run_dir = dev_run_dir
-            ip = res["ip"]
-            if res["status"] == "success":
-                scanned_devices[ip] = res
-            elif res["status"] == "partial":
-                scanned_devices[ip] = res
-                failed_devices.append({"ip": ip, "reason": res["reason"], "status": "partial"})
-            else:
-                failed_devices.append({"ip": ip, "reason": res["reason"], "status": "failed"})
+    # Put the first host back into the queue so it gets crawled
+    discovered_queue.put(first_host)
+
+    with ThreadPoolExecutor(max_workers=10) as crawler_executor:
+        crawler_futures = []
+        
+        while not scanning_complete_event.is_set() or not discovered_queue.empty():
+            try:
+                t = discovered_queue.get(timeout=0.1)
+                future = crawler_executor.submit(
+                    crawl_device,
+                    t["ip"],
+                    t["ports"],
+                    username,
+                    password,
+                    timestamp
+                )
+                crawler_futures.append(future)
+            except queue.Empty:
+                continue
+
+        # Wait for all crawler jobs to finish
+        print("[*] Scan complete or finalizing. Waiting for crawling workers to finish...")
+        for future in as_completed(crawler_futures):
+            try:
+                res, dev_run_dir = future.result()
+                if dev_run_dir:
+                    run_dir = dev_run_dir
+                ip = res["ip"]
+                if res["status"] == "success":
+                    scanned_devices[ip] = res
+                elif res["status"] == "partial":
+                    scanned_devices[ip] = res
+                    failed_devices.append({"ip": ip, "reason": res["reason"], "status": "partial"})
+                else:
+                    failed_devices.append({"ip": ip, "reason": res["reason"], "status": "failed"})
+            except Exception as e:
+                print(f"Error executing crawl: {e}")
 
     print("\n--- Phase 4: Generating Deliverables ---")
     if scanned_devices:
