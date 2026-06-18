@@ -50,7 +50,17 @@ function Show-Header {
 
 # Try to find Python if it's not in PATH
 function Find-Python {
-    # 1. Test if 'python' in path works and is a real Python (not Microsoft Store link)
+    # 1. First, reload the process PATH from the User and Machine environments to catch recent installs
+    try {
+        $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        $newPath = "$userPath;$machinePath"
+        if ($newPath) {
+            $env:PATH = ($newPath -split ';' | Where-Object { $_ } | Select-Object -Unique) -join ';'
+        }
+    } catch {}
+
+    # 2. Test if 'python' in path works and is a real Python (not Microsoft Store link)
     try {
         $ver = & python --version 2>&1
         if ($ver -like "*Python 3*") {
@@ -58,7 +68,34 @@ function Find-Python {
         }
     } catch {}
 
-    # 2. Check common Local AppData path
+    # 3. Check Python Registry keys (very common for standard installers)
+    $regPaths = @(
+        "HKCU:\Software\Python\PythonCore",
+        "HKLM:\Software\Python\PythonCore",
+        "HKCU:\Software\Wow6432Node\Python\PythonCore",
+        "HKLM:\Software\Wow6432Node\Python\PythonCore"
+    )
+    foreach ($regPath in $regPaths) {
+        if (Test-Path $regPath) {
+            $versions = Get-ChildItem -Path $regPath -ErrorAction SilentlyContinue | Select-Object -ExpandProperty PSChildName
+            foreach ($v in $versions) {
+                $installPathKey = "$regPath\$v\InstallPath"
+                if (Test-Path $installPathKey) {
+                    $installPath = (Get-ItemProperty -Path $installPathKey -Name "(default)" -ErrorAction SilentlyContinue)."(default)"
+                    if ($installPath -and (Test-Path (Join-Path $installPath "python.exe"))) {
+                        $pyDir = [System.IO.Path]::GetFullPath($installPath)
+                        # Add to path for this session
+                        if ($env:PATH -notlike "*$pyDir*") {
+                            $env:PATH = "$pyDir;$(Join-Path $pyDir "Scripts");$env:PATH"
+                        }
+                        return "python"
+                    }
+                }
+            }
+        }
+    }
+
+    # 4. Check common Local AppData path
     $localPythonPath = "$env:LocalAppData\Programs\Python"
     if (Test-Path $localPythonPath) {
         $localPythonDirs = Get-ChildItem -Path $localPythonPath -Directory -ErrorAction SilentlyContinue
@@ -66,8 +103,7 @@ function Find-Python {
             $pyPath = Join-Path $dir.FullName "python.exe"
             if (Test-Path $pyPath) {
                 # Add to path for this session
-                $env:PATH += ";$($dir.FullName)"
-                $env:PATH += ";$(Join-Path $dir.FullName "Scripts")"
+                $env:PATH = "$($dir.FullName);$(Join-Path $dir.FullName "Scripts");$env:PATH"
                 try {
                     $ver = & python --version 2>&1
                     if ($ver -like "*Python 3*") {
@@ -78,7 +114,7 @@ function Find-Python {
         }
     }
 
-    # 3. Check Program Files
+    # 5. Check Program Files
     $programFilesPath = $env:ProgramFiles
     if (Test-Path $programFilesPath) {
         $programPythonDirs = Get-ChildItem -Path "$programFilesPath\Python*" -Directory -ErrorAction SilentlyContinue
@@ -86,8 +122,7 @@ function Find-Python {
             $pyPath = Join-Path $dir.FullName "python.exe"
             if (Test-Path $pyPath) {
                 # Add to path for this session
-                $env:PATH += ";$($dir.FullName)"
-                $env:PATH += ";$(Join-Path $dir.FullName "Scripts")"
+                $env:PATH = "$($dir.FullName);$(Join-Path $dir.FullName "Scripts");$env:PATH"
                 try {
                     $ver = & python --version 2>&1
                     if ($ver -like "*Python 3*") {
@@ -188,12 +223,22 @@ function Install-Dependencies {
         if (Get-Command winget -ErrorAction SilentlyContinue) {
             Write-Host "Running: winget install -e --id Python.Python.3" -ForegroundColor Cyan
             winget install -e --id Python.Python.3 --source winget
-            Write-Host "[*] Python installation complete. Please close and restart this script/shell to load new environment paths." -ForegroundColor Green
+            
+            Write-Host "[*] Re-detecting Python..." -ForegroundColor Cyan
+            $global:PythonCmd = Find-Python
+            
+            if (-not $global:PythonCmd) {
+                Write-Host "[!] Python was installed but could not be auto-detected in this session." -ForegroundColor Yellow
+                Write-Host "[!] Please close and restart this script/shell to reload environment variables." -ForegroundColor Yellow
+                return
+            } else {
+                Write-Host "[✓] Python auto-detected successfully!" -ForegroundColor Green
+            }
         } else {
             Write-Host "[!] Winget not found. Please download Python 3 manually from: https://www.python.org/downloads/" -ForegroundColor Red
             Write-Host "[!] IMPORTANT: Make sure to check 'Add python.exe to PATH' during installation!" -ForegroundColor Yellow
+            return
         }
-        return
     }
 
     Write-Host "Running: python -m pip install --upgrade pip" -ForegroundColor Cyan
