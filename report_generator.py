@@ -299,7 +299,23 @@ def generate_l3_diagram(devices, output_path="L3_network_diagrams.md"):
     adj = {} # node -> set of neighbors
     subnets = set()
     device_nodes = set()
+    subnet_vlan_names = {} # subnet_cidr -> set of vlan names
     
+    # Pre-parse VLAN names for all devices
+    device_vlan_maps = {}
+    for ip, dev in devices.items():
+        hostname = dev.get("hostname") or ip
+        cfg = dev.get("raw_config", "")
+        vlan_names = {}
+        if cfg:
+            matches = re.finditer(r'^vlan\s+(\d+)\s*[\r\n]+(?:\s+name\s+(\S+))?', cfg, re.MULTILINE | re.IGNORECASE)
+            for match in matches:
+                vlan_id = match.group(1)
+                name = match.group(2)
+                if name:
+                    vlan_names[vlan_id] = name.strip()
+        device_vlan_maps[hostname] = vlan_names
+
     for ip, dev in devices.items():
         hostname = dev.get("hostname") or ip
         device_nodes.add(hostname)
@@ -307,6 +323,7 @@ def generate_l3_diagram(devices, output_path="L3_network_diagrams.md"):
             adj[hostname] = set()
             
         l3_ints = dev.get("l3_interfaces", [])
+        vlan_names = device_vlan_maps.get(hostname, {})
         for intf in l3_ints:
             intf_ip = intf.get("ip_address")
             if not intf_ip or intf_ip in ["unassigned", "down", "up", "unset"]:
@@ -321,6 +338,17 @@ def generate_l3_diagram(devices, output_path="L3_network_diagrams.md"):
                 
             adj[hostname].add(clean_ip_base)
             adj[clean_ip_base].add(hostname)
+            
+            # Extract VLAN ID to map name
+            intf_name = intf.get("interface", "")
+            vlan_match = re.search(r'(?:vlan|vl)\s*(\d+)', intf_name, re.IGNORECASE)
+            if vlan_match:
+                vlan_id = vlan_match.group(1)
+                vname = vlan_names.get(vlan_id)
+                if vname:
+                    if clean_ip_base not in subnet_vlan_names:
+                        subnet_vlan_names[clean_ip_base] = set()
+                    subnet_vlan_names[clean_ip_base].add(vname)
             
     mindmap_lines = []
     if not adj:
@@ -362,7 +390,9 @@ def generate_l3_diagram(devices, output_path="L3_network_diagrams.md"):
             elif node in device_nodes:
                 shape = f"({safe_text})"
             else:
-                shape = f"[{safe_text}]"
+                vnames = subnet_vlan_names.get(node, set())
+                vname_suffix = f" ({'/'.join(sorted(vnames))})" if vnames else ""
+                shape = f"[Subnet: {safe_text}{vname_suffix}]"
             mindmap_lines.append(f"{indent}{shape}")
             
         def walk_tree(subtree, indent_level):
@@ -384,8 +414,8 @@ def generate_l3_diagram(devices, output_path="L3_network_diagrams.md"):
         "",
         "## Authoritative VLAN, Subnet & SVI Map",
         "",
-        "| Switch Hostname | Interface / VLAN | Description | SVI IP Address | Subnet Range | Interface Status |",
-        "| --- | --- | --- | --- | --- | --- |"
+        "| Switch Hostname | Interface / VLAN | VLAN Name | Description | SVI IP Address | Subnet Range | Interface Status |",
+        "| --- | --- | --- | --- | --- | --- | --- |"
     ]
     
     for ip, dev in devices.items():
@@ -405,8 +435,15 @@ def generate_l3_diagram(devices, output_path="L3_network_diagrams.md"):
                     desc = stats.get("description", "")
                     break
                     
+            # Get VLAN name
+            vlan_name = "N/A"
+            vlan_match = re.search(r'(?:vlan|vl)\s*(\d+)', intf_name, re.IGNORECASE)
+            if vlan_match:
+                vlan_id = vlan_match.group(1)
+                vlan_name = device_vlan_maps.get(hostname, {}).get(vlan_id, "N/A")
+                    
             subnet_range = '.'.join(ip_addr.split('.')[:3]) + '.0/24' if (ip_addr and '.' in ip_addr) else 'N/A'
-            lines.append(f"| {hostname} | {intf_name} | {desc or 'N/A'} | {ip_addr} | {subnet_range} | {status} |")
+            lines.append(f"| {hostname} | {intf_name} | {vlan_name} | {desc or 'N/A'} | {ip_addr} | {subnet_range} | {status} |")
             
     lines.extend([
         "",
