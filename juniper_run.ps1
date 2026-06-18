@@ -221,8 +221,8 @@ function Install-Dependencies {
     if (-not $global:PythonCmd) {
         Write-Host "[!] Python is not installed. Attempting to install Python 3 via Winget..." -ForegroundColor Yellow
         if (Get-Command winget -ErrorAction SilentlyContinue) {
-            Write-Host "Running: winget install -e --id Python.Python.3" -ForegroundColor Cyan
-            winget install -e --id Python.Python.3 --source winget
+            Write-Host "Running: winget install -e --id Python.Python.3.12" -ForegroundColor Cyan
+            winget install -e --id Python.Python.3.12 --source winget
             
             Write-Host "[*] Re-detecting Python..." -ForegroundColor Cyan
             $global:PythonCmd = Find-Python
