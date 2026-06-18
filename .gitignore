@@ -6,8 +6,11 @@ __pycache__/
 # Local outputs & logs
 raw_logs/
 backups/
+outputs/
 nmap_results.xml
+nmap_results_juniper.xml
 failed_hosts.json
+juniper_failed_hosts.json
 asset_inventory.csv
 L2_network_diagrams.md
 L3_network_diagrams.md

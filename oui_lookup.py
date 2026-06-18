@@ -406,7 +406,9 @@ def download_oui_db():
     url = "http://standards-oui.ieee.org/oui/oui.txt"
     print("Downloading IEEE OUI Registry (approx 5MB)...")
     try:
-        urllib.request.urlretrieve(url, OUI_FILE)
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response, open(OUI_FILE, 'wb') as out_file:
+            out_file.write(response.read())
         print(f"IEEE OUI database successfully saved to {OUI_FILE}")
         return True
     except Exception as e:
