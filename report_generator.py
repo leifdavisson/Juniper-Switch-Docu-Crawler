@@ -1,7 +1,76 @@
 import csv
 import os
 import json
+import re
 from netaddr import IPNetwork, IPSet
+
+def normalize_interface_name(name):
+    if not name:
+        return ""
+    name = name.lower().strip()
+    replacements = {
+        "gigabitethernet": "gi",
+        "tengigabitethernet": "te",
+        "fastethernet": "fa",
+        "ethernet": "et",
+        "fortygigabitethernet": "fo",
+        "hundredgige": "hu",
+        "hundredgigabitethernet": "hu",
+        "fivegigabitethernet": "fi",
+        "twopointfivegigabitethernet": "tw",
+        "port-channel": "po",
+        "bundle-ether": "be"
+    }
+    for full, short in replacements.items():
+        if name.startswith(full):
+            return name.replace(full, short)
+    return name
+
+def get_link_speed(local_port, interfaces_detail):
+    norm_local = normalize_interface_name(local_port)
+    
+    # 1. Try to find in interfaces_detail
+    for name, stats in interfaces_detail.items():
+        if normalize_interface_name(name) == norm_local:
+            speed_str = stats.get("speed", "").lower()
+            if speed_str:
+                if "100g" in speed_str or "100000" in speed_str:
+                    return "100G"
+                elif "40g" in speed_str or "40000" in speed_str:
+                    return "40G"
+                elif "10g" in speed_str or "10000" in speed_str:
+                    return "10G"
+                elif "5g" in speed_str or "5000" in speed_str:
+                    return "5G"
+                elif "2.5g" in speed_str or "2500" in speed_str:
+                    return "2.5G"
+                elif "1000m" in speed_str or "1g" in speed_str or "1000" in speed_str:
+                    return "1G"
+                elif "100m" in speed_str or "100" in speed_str:
+                    return "100M"
+                elif "10m" in speed_str or "10" in speed_str:
+                    return "10M"
+    
+    # 2. Fallback to guessing from interface name
+    if "hu" in norm_local or "hundred" in norm_local:
+        return "100G"
+    elif "fo" in norm_local or "forty" in norm_local:
+        return "40G"
+    elif "te" in norm_local or "ten" in norm_local:
+        return "10G"
+    elif "fi" in norm_local or "five" in norm_local:
+        return "5G"
+    elif "tw" in norm_local or "twopointfive" in norm_local:
+        return "2.5G"
+    elif "gi" in norm_local or "gig" in norm_local:
+        return "1G"
+    elif "fa" in norm_local or "fast" in norm_local:
+        return "100M"
+    elif "et" in norm_local or "eth" in norm_local:
+        return "10M"
+        
+    return "1G" # Default to 1G if unknown
+
 
 def generate_asset_inventory(devices, output_path="asset_inventory.csv"):
     """
@@ -93,7 +162,7 @@ def generate_l2_diagram(devices, output_path="L2_network_diagrams.md"):
         is_root = dev.get("stp", {}).get("is_root", False)
         
         # Node label with Model
-        label = f"{hostname}[\"{hostname}<br/>({model})\"]"
+        label = f"[\"{hostname}<br/>({model})\"]"
         lines.append(f"  {hostname}{label}")
         
         # Apply classes
@@ -152,23 +221,33 @@ def generate_l2_diagram(devices, output_path="L2_network_diagrams.md"):
                     is_blocked = True
                     break
             
-            # Label link with ports
-            link_label = f"|{local_port} -- {remote_port}|"
+            # Determine link speed and thickness
+            speed_val = get_link_speed(local_port, dev.get("interfaces_detail", {}))
+            thickness = {
+                "10M": "1px",
+                "100M": "2px",
+                "1G": "3.5px",
+                "2.5G": "5px",
+                "5G": "6px",
+                "10G": "7.5px",
+                "40G": "9px",
+                "100G": "11px"
+            }.get(speed_val, "3.5px")
             
             if is_blocked:
                 # Dotted red line for blocked paths
                 lines.append(f"  {hostname} -.-> {node_b}")
-                # Add link styling index
-                link_styles.append(f"  linkStyle {link_idx} stroke:#ff3333,stroke-width:2px,stroke-dasharray: 5 5;")
+                link_styles.append(f"  linkStyle {link_idx} stroke:#ff3333,stroke-width:{thickness},stroke-dasharray: 5 5;")
             else:
                 lines.append(f"  {hostname} === {node_b}")
+                link_styles.append(f"  linkStyle {link_idx} stroke:#333,stroke-width:{thickness};")
                 
             link_idx += 1
 
-    # 3. Add link styles for blocked links
+    # 3. Add link styles
     if link_styles:
         lines.append("")
-        lines.append("  %% Link Styles (STP Blocked paths in dotted red)")
+        lines.append("  %% Link Styles (thickness based on link speed)")
         lines.extend(link_styles)
         
     lines.extend([
@@ -179,8 +258,9 @@ def generate_l2_diagram(devices, output_path="L2_network_diagrams.md"):
         "* **Blue Node**: Core / Distribution switches.",
         "* **Grey Node**: Access switches.",
         "* **Dashed Red Lines**: STP Blocking (`BLK`) links.",
-        "* **Double Solid Lines**: Active forwarding links.",
+        "* **Double Solid Lines**: Active forwarding links (line thickness indicates speed).",
         "",
+
         "## Wireless Overlay Layout",
         "Discovered Wireless Access Points connected to switches:"
     ])
@@ -212,9 +292,86 @@ def generate_l2_diagram(devices, output_path="L2_network_diagrams.md"):
 
 def generate_l3_diagram(devices, output_path="L3_network_diagrams.md"):
     """
-    Generates L3 logical and routing topologies using Mermaid.js.
+    Generates L3 logical and routing topologies using Mermaid.js mindmap.
     Lists subnets, SVIs, VLANs, and VRFs.
     """
+    # 1. Build adjacency list of the bipartite graph
+    adj = {} # node -> set of neighbors
+    subnets = set()
+    device_nodes = set()
+    
+    for ip, dev in devices.items():
+        hostname = dev.get("hostname") or ip
+        device_nodes.add(hostname)
+        if hostname not in adj:
+            adj[hostname] = set()
+            
+        l3_ints = dev.get("l3_interfaces", [])
+        for intf in l3_ints:
+            intf_ip = intf.get("ip_address")
+            if not intf_ip or intf_ip in ["unassigned", "down", "up", "unset"]:
+                continue
+            
+            # Simple assumption of subnet for SVI / routing interface
+            clean_ip_base = ".".join(intf_ip.split('.')[:3]) + ".0/24"
+            subnets.add(clean_ip_base)
+            
+            if clean_ip_base not in adj:
+                adj[clean_ip_base] = set()
+                
+            adj[hostname].add(clean_ip_base)
+            adj[clean_ip_base].add(hostname)
+            
+    mindmap_lines = []
+    if not adj:
+        mindmap_lines.append("mindmap")
+        mindmap_lines.append("  root((No L3 Interfaces Discovered))")
+    else:
+        # 2. Find root node (most connected node)
+        root_node = max(adj.keys(), key=lambda k: len(adj[k]))
+        
+        # 3. BFS to build tree hierarchy
+        visited = {root_node}
+        
+        def build_subtree(node):
+            subtree = {}
+            # Sort neighbors by degree (most connected first)
+            neighbors = sorted(adj[node], key=lambda k: len(adj[k]), reverse=True)
+            for neighbor in neighbors:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    subtree[neighbor] = build_subtree(neighbor)
+            return subtree
+            
+        tree = {root_node: build_subtree(root_node)}
+        
+        # Add any disconnected components
+        for node in adj.keys():
+            if node not in visited:
+                visited.add(node)
+                tree[root_node][node] = build_subtree(node)
+                
+        # 4. Render tree to Mermaid mindmap syntax
+        mindmap_lines.append("mindmap")
+        
+        def render_node(node, indent_level):
+            indent = "  " * indent_level
+            safe_text = node.replace('"', '\\"')
+            if node == root_node:
+                shape = f"(({safe_text}))"
+            elif node in device_nodes:
+                shape = f"({safe_text})"
+            else:
+                shape = f"[{safe_text}]"
+            mindmap_lines.append(f"{indent}{shape}")
+            
+        def walk_tree(subtree, indent_level):
+            for node, children in subtree.items():
+                render_node(node, indent_level)
+                walk_tree(children, indent_level + 1)
+                
+        walk_tree(tree, 1)
+
     lines = [
         "# Layer 3 & Logical Network Diagrams",
         "",
@@ -222,60 +379,14 @@ def generate_l3_diagram(devices, output_path="L3_network_diagrams.md"):
         "",
         "## Logical Routing Boundary Diagram",
         "```mermaid",
-        "graph LR",
-        "  classDef subnet fill:#eafaf1,stroke:#2ecc71,stroke-width:1px;",
-        "  classDef router fill:#ebf5fb,stroke:#2980b9,stroke-width:2px;",
-        ""
-    ]
-    
-    subnets_seen = set()
-    switch_svis = [] # list of (switch, interface, ip, subnet)
-    
-    # Collect all L3 SVIs and routing interfaces
-    for ip, dev in devices.items():
-        hostname = dev.get("hostname") or ip
-        interfaces = dev.get("l3_interfaces", [])
-        
-        for intf in interfaces:
-            intf_ip = intf.get("ip_address")
-            if not intf_ip or intf_ip in ["unassigned", "down", "up", "unset"]:
-                continue
-            
-            # Simple assumption of subnet for SVI / routing interface
-            # Since SVI might not show mask in 'brief' output, we look for running config or guess
-            # For mapping, we represent the SVI as linking the switch to a subnet node
-            # We will generate a subnet label.
-            # E.g., we look up IP masks from running configuration or guess a /24 if unknown
-            # To keep it clean, we create a subnet node "Subnet_IP_X"
-            clean_ip_base = ".".join(intf_ip.split('.')[:3]) + ".0/24"
-            subnet_id = "subnet_" + clean_ip_base.replace('.', '_').replace('/', '_')
-            
-            if subnet_id not in subnets_seen:
-                subnets_seen.add(subnet_id)
-                lines.append(f"  {subnet_id}[\"Subnet: {clean_ip_base}\"]")
-                lines.append(f"  class {subnet_id} subnet;")
-                
-            lines.append(f"  {hostname} --- {subnet_id}")
-            switch_svis.append({
-                "switch": hostname,
-                "interface": intf.get("interface"),
-                "ip": intf_ip,
-                "subnet": clean_ip_base
-            })
-            
-    # Include router devices node class styling
-    for ip, dev in devices.items():
-        hostname = dev.get("hostname") or ip
-        lines.append(f"  class {hostname} router;")
-        
-    lines.extend([
+        "\n".join(mindmap_lines),
         "```",
         "",
         "## Authoritative VLAN, Subnet & SVI Map",
         "",
         "| Switch Hostname | Interface / VLAN | SVI IP Address | Subnet Range | Interface Status |",
         "| --- | --- | --- | --- | --- |"
-    ])
+    ]
     
     for ip, dev in devices.items():
         hostname = dev.get("hostname") or ip
