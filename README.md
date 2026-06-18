@@ -1,7 +1,7 @@
-# Cisco Switch Docu-Crawler
+# Juniper Switch Docu-Crawler
 
 <p align="center">
-  <img src="docs/images/banner.jpg" alt="Cisco Switch Docu-Crawler Banner" width="100%" max-width="800px" style="border-radius: 8px;" />
+  <img src="docs/images/banner.png" alt="Juniper Switch Docu-Crawler Banner" width="100%" max-width="800px" style="border-radius: 8px;" />
 </p>
 
 <p align="center">
@@ -22,118 +22,69 @@
   </a>
 </p>
 
-A portable, self-contained Python 3 CLI tool that performs network discovery, logs into Cisco switches (supporting **IOS / IOS-XE**, **NX-OS**, and **IOS-XR**), runs safe read-only commands, and compiles authoritative network inventory, configuration diffs, and migration documentation reports.
+A portable, self-contained Python 3 CLI tool that performs network discovery, logs into Juniper switches (supporting **Junos**, **ELS**, and **Non-ELS**), runs safe read-only commands, and compiles authoritative network inventory, configuration backups, and network diagrams.
 
 ---
 
 ## ✨ Features
 
 * **Nmap & Socket Scanner Fallback:** Uses `nmap` via subprocess for scanning. If `nmap` is not installed, it falls back to a built-in multi-threaded Python TCP port scanner.
-* **Auto-OS Detection:** Connects initially, detects the Cisco OS (IOS, NX-OS, IOS-XR) via system strings, and dynamically loads the correct Netmiko driver.
-* **Safe, Read-Only CLI Commands:** Executes safe status commands (e.g., `show version`, `show running-config`, `show ip interface brief`, `show interfaces`, `show arp`, `show cdp/lldp neighbors`, `show spanning-tree`, `show ip route`).
-* **Switch Configuration Benchmarking:** Saves running configurations as standard baselines and provides comparison diffs to track configuration drift over time.
+* **Junos CLI Automation:** Connects using Netmiko's `juniper_junos` drivers and interacts specifically with Junos devices.
+* **Safe, Read-Only CLI Commands:** Executes safe status commands (e.g., `show version`, `show chassis hardware`, `show interfaces terse`, `show interfaces`, `show lldp neighbors detail`, `show spanning-tree`, `show route`, `show configuration | display set`).
+* **Switch Configuration Backups:** Saves `display set` running configurations as standard backups for documentation.
 * **Offline OUI Lookup:** Resolves manufacturer MAC addresses using a built-in common vendor database, with automatic fallback to loading or downloading the official IEEE OUI registry.
-* **Failure Management / Retry:** Logs failed or partial hosts to `failed_hosts.json`. You can resume/retry scanning just those hosts using new credentials or network configurations.
-* **Cross-Platform Bootstrappers:** Standard shell scripts (`run.sh` for Linux/macOS) and PowerShell scripts (`run.ps1` and `run.bat` for Windows 11) handle all prerequisite checks and execution safety guards.
+* **Failure Management / Retry:** Logs failed or partial hosts to `juniper_failed_hosts.json`. You can resume/retry scanning just those hosts using new credentials or network configurations.
 
 ---
 
 ## 📂 Deliverables Generated
 
-After a successful scan, the crawler compiles and generates the following reports in the current directory:
+After a successful scan, the crawler compiles and generates the following reports in `outputs/juniper_run_<timestamp>/`:
 
-1. **`asset_inventory.csv`**: The authoritative inventory database including Hostname, IP, MAC Address, Device Type, Model, Firmware, Serial Number, Role, and Management Protocol.
-2. **`migration_cabling_matrix.csv`**: A port-by-port cabling patching matrix mapping Cisco interfaces, connected MACs, resolved vendors (OUI), descriptions, link speeds, VLAN numbers, names, and target destination switch ports.
-3. **`cisco_to_target_translation.md`**: A detailed command-by-command and feature-by-feature translation map bridging Cisco CLI syntax (IOS/NX-OS/XR) with standard modern target switches.
-4. **`migration_config_variables.json`**: An extracted variables database containing hostname, domain name, VLAN names, IP interfaces, routing configurations, NTP, SNMP, AAA, and DNS details.
-5. **`L2_network_diagrams.md`**: Physical topologies, switch-to-switch uplinks, switch stacks, wireless AP connections, and STP blocking/forwarding links documented in standard **Mermaid.js** diagrams.
-6. **`L3_network_diagrams.md`**: Logical routing boundaries, Switch Virtual Interfaces (SVIs), VLAN mapping tables, and VRF instances mapped out via Mermaid.js.
-7. **`network_analysis_report.md`**: Detailed Layer 1-7 behavior analysis highlighting cabling errors, port utilization percentages, loop/STP risks, overlapping subnets, dynamic routing configurations, AAA/RADIUS setups, and security gaps.
-8. **`failed_hosts.json`**: List of hosts that failed scanning for follow-up runs.
-
-
-## 🚀 Getting Started
-
-### Quick Start (Recommended)
-The easiest way to initialize the environment, install requirements, and run the crawler is using the interactive menu shell:
-
-* **Linux/macOS:**
-  ```bash
-  chmod +x run.sh
-  ./run.sh
-  ```
-* **Windows (PowerShell):**
-  Double click on `run.bat` or run:
-  ```powershell
-  PowerShell.exe -ExecutionPolicy Bypass -File .\run.ps1
-  ```
-
-This shell will guide you through checking requirements, installing dependencies, executing discovery, comparing baselines, retrying failed hosts, and listing backups.
+1. **`asset_inventory.csv`**: The authoritative inventory database including Hostname, IP, MAC Address, Model, Firmware, Serial Number, and ELS/Non-ELS architecture.
+2. **`L2_network_diagrams.md`**: Physical topologies, switch-to-switch uplinks, and STP blocking/forwarding links documented in standard **Mermaid.js** diagrams.
+3. **`L3_network_diagrams.md`**: Logical routing boundaries and L3 interfaces mapped out via Mermaid.js.
+4. **`network_analysis_report.md`**: Detailed Layer 1-7 behavior analysis highlighting cabling errors, port utilization, loop/STP risks, and L4-L7 configurations.
 
 ---
 
-### Manual CLI Execution (Alternative)
+## 🚀 Getting Started
 
-If you prefer to run the scripts manually, follow these steps:
-
-#### 1. Installation
-Install the light dependencies:
+### 1. Installation
+Ensure Python 3 is installed, then install the light dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-#### 2. Make Crawler Executable
+### 2. Make Run Script Executable (Linux/macOS)
 ```bash
-chmod +x cisco_crawler.py
+chmod +x juniper_run.sh
 ```
 
-#### 3. Run the Discovery Scanner
+### 3. Run the Discovery Scanner
+You can run the wrapper script:
 ```bash
-./cisco_crawler.py
+./juniper_run.sh
 ```
 *If no subnets are passed, the script automatically detects your machine's local IP and suggests your local `/24` subnet as the default.*
 
 To specify target subnets directly via CLI:
 ```bash
-./cisco_crawler.py --subnets 192.168.1.0/24,10.0.5.0/24
+./juniper_run.sh --subnets 192.168.1.0/24,10.0.5.0/24
 ```
 
-#### 4. Baseline Configuration Saving
-To save a snapshot of the current configurations:
+Alternatively, you can run the python script directly:
 ```bash
-./cisco_crawler.py --baseline
+python3 juniper_crawler.py --subnets 192.168.1.0/24
 ```
 
-#### 5. Configuration Drift / Comparison Diffs
-To run the crawler and check for changes against the saved baseline:
-```bash
-./cisco_crawler.py --compare
-```
-
-#### 6. Retry Failed/Partial Scans
-If any switches fail (due to network timeout, bad credentials, or AAA/enable issues), their details are logged in `failed_hosts.json`. 
+#### 4. Retry Failed/Partial Scans
+If any switches fail (due to network timeout, bad credentials, etc.), their details are logged in `juniper_failed_hosts.json`. 
 
 You can rerun the crawler to target **only** the failed devices:
 ```bash
-./cisco_crawler.py --retry failed_hosts.json
+./juniper_run.sh --retry juniper_failed_hosts.json
 ```
-*(The script will scan only those hosts and prompt for credentials again, making it easy to try alternate passwords or troubleshoot connectivity)*
-
----
-
-## 🛠️ Safe Command Comparison Cheat Sheet
-
-This crawler normalizes command inputs across Cisco platforms based on the following differences:
-
-| Function | IOS / IOS-XE | NX-OS | IOS-XR |
-| --- | --- | --- | --- |
-| **Interfaces Summary** | `show ip interface brief` | `show ip interface brief` | `show ipv4 interface brief` |
-| **MAC Address Table** | `show mac address-table` | `show mac address-table` | Parsed from `show interfaces` / `show arp` |
-| **ARP Table** | `show arp` | `show ip arp` | `show arp` |
-| **Topology Discovery**| CDP + LLDP detail | CDP + LLDP detail | LLDP only |
-| **Spanning Tree** | `show spanning-tree` | `show spanning-tree` | Disabled (Routing platforms) |
-| **Routing Table** | `show ip route` | `show ip route` | `show route` |
-| **Paging Control** | `terminal length 0` | `terminal length 0` | `terminal length 0` |
 
 ---
 
@@ -144,23 +95,13 @@ The generated reports are written in **Markdown (`.md`)** format, which is a cle
 To view the reports with rich formatting and render the diagrams automatically, we recommend using one of the following tools:
 
 ### 1. Obsidian (Recommended & Easiest)
-[Obsidian](https://obsidian.md/) is a free, highly-rated note-taking app available for Windows, macOS, and Linux.
-* **Why it's best:** It natively supports Markdown and renders Mermaid diagrams instantly out-of-the-box without needing any plugins or setup.
-* **How to use:** Install Obsidian, click "Open folder as vault", and select the folder where the crawler generated your reports.
+[Obsidian](https://obsidian.md/) natively supports Markdown and renders Mermaid diagrams instantly out-of-the-box.
 
 ### 2. GitHub (Zero Installation)
-If you push these files to a GitHub repository:
-* **Why it's best:** GitHub natively parses Markdown and renders Mermaid diagrams directly inside the web browser.
-* **How to use:** Simply click on any `.md` file on your GitHub project page to read it.
+GitHub natively parses Markdown and renders Mermaid diagrams directly inside the web browser.
 
 ### 3. Visual Studio Code (VS Code)
-For developers and IT administrators already using VS Code:
-* **How to use:** Open any `.md` file and open the preview tab (`Ctrl+Shift+V` on Windows/Linux or `Cmd+Shift+V` on macOS).
-* **Render Diagrams:** Install the **Markdown Preview Mermaid Support** extension from the Marketplace to render the topologies inside the preview pane.
-
-### 4. Mermaid Live Editor (Web-based)
-If you just want to export the diagrams:
-* **How to use:** Copy the text block starting with ````mermaid` from your diagram reports and paste it into the [Mermaid Live Editor](https://mermaid.live/). From there, you can customize the layout or export it as a high-resolution PNG, SVG, or PDF.
+Open any `.md` file and open the preview tab. Install the **Markdown Preview Mermaid Support** extension to render the topologies. After opening the doc press Ctrl + Shift + V to view the file. 
 
 ---
 

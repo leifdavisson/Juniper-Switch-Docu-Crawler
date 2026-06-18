@@ -1,5 +1,5 @@
 @echo off
-REM Cisco Switch Docu-Crawler - Windows 11 Bootstrap
+REM Juniper Switch Docu-Crawler - Windows 11 Bootstrap
 REM Bypasses PowerShell execution policies to run the pre-req checker and script.
 REM
 REM Copyright (C) 2026 Leif Davisson <leifdavisson@gmail.com>
@@ -18,5 +18,5 @@ REM You should have received a copy of the GNU Affero General Public License
 REM along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 cd /d "%~dp0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "run.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "juniper_run.ps1"
 pause

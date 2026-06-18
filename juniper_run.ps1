@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Cisco Switch Docu-Crawler - Operator Shell for Windows.
+    Juniper Switch Docu-Crawler - Operator Shell for Windows.
 .DESCRIPTION
-    A pre-req checker and runner for the Cisco Docu-Crawler Python script on Windows 11.
+    A pre-req checker and runner for the Juniper Docu-Crawler Python script on Windows 11.
 .EXAMPLE
-    PowerShell.exe -ExecutionPolicy Bypass -File .\run.ps1
+    PowerShell.exe -ExecutionPolicy Bypass -File .\juniper_run.ps1
 #>
 
 # Copyright (C) 2026 Leif Davisson <leifdavisson@gmail.com>
@@ -44,7 +44,7 @@ function Clear-Console {
 
 function Show-Header {
     Write-Host "================================================================" -ForegroundColor Cyan
-    Write-Host "          Cisco Switch Docu-Crawler - Windows Shell             " -ForegroundColor Green
+    Write-Host "          Juniper Switch Docu-Crawler - Windows Shell             " -ForegroundColor Green
     Write-Host "================================================================" -ForegroundColor Cyan
 }
 
@@ -240,8 +240,8 @@ function Run-Discovery {
         return
     }
 
-    Write-Host "`n[*] Starting Cisco Network Discovery Scan..." -ForegroundColor Cyan
-    & $global:PythonCmd cisco_crawler.py
+    Write-Host "`n[*] Starting Juniper Network Discovery Scan..." -ForegroundColor Cyan
+    & $global:PythonCmd juniper_crawler.py
 }
 
 function Retry-Scan {
@@ -250,30 +250,31 @@ function Retry-Scan {
         return
     }
 
-    if (Test-Path "failed_hosts.json") {
-        Write-Host "`n[*] Resuming scan for failed hosts using failed_hosts.json..." -ForegroundColor Cyan
-        & $global:PythonCmd cisco_crawler.py --retry failed_hosts.json
+    if (Test-Path "juniper_failed_hosts.json") {
+        Write-Host "`n[*] Resuming scan for failed hosts using juniper_failed_hosts.json..." -ForegroundColor Cyan
+        & $global:PythonCmd juniper_crawler.py --retry juniper_failed_hosts.json
     } else {
-        Write-Host "`n[!] No failed_hosts.json found. No previous failed scans to resume." -ForegroundColor Yellow
+        Write-Host "`n[!] No juniper_failed_hosts.json found. No previous failed scans to resume." -ForegroundColor Yellow
     }
 }
 
 function List-Backups {
     Write-Host "`n[*] Checking configuration backups..." -ForegroundColor Cyan
-    if (Test-Path "backups") {
-        $cfgs = Get-ChildItem -Path "backups\*.cfg" -ErrorAction SilentlyContinue
+    # Juniper backups are inside outputs/juniper_run_*/backups/
+    if (Test-Path "outputs") {
+        $cfgs = Get-ChildItem -Path "outputs\*\backups\*.cfg" -ErrorAction SilentlyContinue
         if ($cfgs.Count -gt 0) {
             Write-Host "----------------------------------------------------------------"
             foreach ($file in $cfgs) {
                 Write-Host ("{0,-40} ({1} bytes)" -f $file.Name, $file.Length) -ForegroundColor Green
             }
             Write-Host "----------------------------------------------------------------"
-            Write-Host "Backups are stored locally in the 'backups\' folder." -ForegroundColor Green
+            Write-Host "Backups are stored locally in the run output 'backups\' folders." -ForegroundColor Green
         } else {
-            Write-Host "[!] No backup configurations (.cfg) found in the backups\ folder." -ForegroundColor Yellow
+            Write-Host "[!] No backup configurations (.cfg) found in the outputs\ folder." -ForegroundColor Yellow
         }
     } else {
-        Write-Host "[!] The backups\ directory does not exist. Run a successful scan first." -ForegroundColor Yellow
+        Write-Host "[!] The outputs\ directory does not exist. Run a successful scan first." -ForegroundColor Yellow
     }
 }
 
@@ -286,7 +287,7 @@ while ($true) {
     Write-Host "`nOperations Menu:" -ForegroundColor Cyan
     Write-Host "  1) " -NoNewline; Write-Host "Initialize Environment" -ForegroundColor Green -NoNewline; Write-Host " (Install Python + Crawler Packages)"
     Write-Host "  2) " -NoNewline; Write-Host "Run New Discovery Scan" -ForegroundColor Green
-    Write-Host "  3) " -NoNewline; Write-Host "Retry/Resume Failed Devices" -ForegroundColor Green -NoNewline; Write-Host " (Loads failed_hosts.json)"
+    Write-Host "  3) " -NoNewline; Write-Host "Retry/Resume Failed Devices" -ForegroundColor Green -NoNewline; Write-Host " (Loads juniper_failed_hosts.json)"
     Write-Host "  4) " -NoNewline; Write-Host "List Current Backups" -ForegroundColor Green
     Write-Host "  5) " -NoNewline; Write-Host "Install Nmap Utility" -ForegroundColor Green -NoNewline; Write-Host " (Optional)"
     Write-Host "  6) " -NoNewline; Write-Host "Exit" -ForegroundColor Red
