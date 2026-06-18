@@ -1,6 +1,6 @@
-# Contributing to Cisco Switch Docu-Crawler
+# Contributing to Juniper Switch Docu-Crawler
 
-Thank you for choosing to contribute to the Cisco Switch Docu-Crawler project! We welcome all contributions, including bug fixes, feature requests, documentation improvements, and refactoring.
+Thank you for choosing to contribute to the Juniper Switch Docu-Crawler project! We welcome all contributions, including bug fixes, feature requests, documentation improvements, and refactoring.
 
 Please read through these guidelines to ensure a smooth contribution process.
 
@@ -17,13 +17,13 @@ All contributors are expected to adhere to our [Code of Conduct](CODE_OF_CONDUCT
 1. **Fork the Repository**: Create a personal fork on GitHub.
 2. **Clone the Repo**:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Cisco-Docu-Crawler.git
-   cd Cisco-Docu-Crawler
+   git clone https://github.com/YOUR_USERNAME/Juniper-Switch-Docu-Crawler.git
+   cd Juniper-Switch-Docu-Crawler
    ```
 3. **Set Up the Environment**:
    It is recommended to run the bootstrap scripts to ensure you have Python 3, Pip, and dependencies set up:
-   * **Linux/macOS**: `./run.sh`
-   * **Windows**: `.\run.bat` or `.\run.ps1`
+   * **Linux/macOS**: `./juniper_run.sh`
+   * **Windows**: `.\juniper_run.bat` or `.\juniper_run.ps1`
 4. **Create a Topic Branch**:
    ```bash
    git checkout -b feature/my-new-feature
@@ -42,7 +42,7 @@ The core design principle of this tool is **Read-Only / Non-Impacting** executio
 * Ensure all local modules are clean of unused imports.
 * Run python compile checks before submitting:
   ```bash
-  python3 -m py_compile cisco_crawler.py parser.py report_generator.py oui_lookup.py
+  python3 -m py_compile juniper_crawler.py juniper_parser.py juniper_report_generator.py oui_lookup.py
   ```
 
 ### 3. Adding License Headers
@@ -62,7 +62,7 @@ All new `.py`, `.sh`, `.ps1`, and `.bat` files must begin with the standard AGPL
 1. Commit your changes locally. Make sure your commit messages are clear and follow standard conventions (e.g. `fix: resolve interface parsing regex crash`).
 2. Push your topic branch to your fork.
 3. Open a Pull Request from your branch to `main` of the main repository.
-4. Describe the changes, the tests you performed, and the switches you validated against (e.g. Cisco Catalyst 2960, Nexus 9000, etc.).
+4. Describe the changes, the tests you performed, and the switches you validated against (e.g. Juniper EX4300, SRX300, QFX5100, etc.).
 
 ## Contact / Help
 If you have questions, feel free to open a GitHub Issue or contact the maintainer at **leifdavisson@gmail.com**.

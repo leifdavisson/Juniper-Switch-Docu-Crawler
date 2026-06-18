@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/leifdavisson/Cisco-Docu-Crawler/actions/workflows/ci.yml">
-    <img src="https://github.com/leifdavisson/Cisco-Docu-Crawler/actions/workflows/ci.yml/badge.svg" alt="CI Status" />
+  <a href="https://github.com/leifdavisson/Juniper-Switch-Docu-Crawler/actions/workflows/ci.yml">
+    <img src="https://github.com/leifdavisson/Juniper-Switch-Docu-Crawler/actions/workflows/ci.yml/badge.svg" alt="CI Status" />
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/License-AGPL%20v3-blue.svg" alt="License: AGPL v3" />
