@@ -19,8 +19,6 @@ import juniper_report_generator
 
 RAW_LOGS_DIR = "raw_logs"
 BACKUPS_DIR = "backups"
-os.makedirs(RAW_LOGS_DIR, exist_ok=True)
-os.makedirs(BACKUPS_DIR, exist_ok=True)
 
 def get_local_ip_subnet():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -194,7 +192,7 @@ def crawl_device(ip, ports, username, password, timestamp):
             print(f"[{ip}] Telnet connection failed: {e}")
 
     if not conn:
-        return {"ip": ip, "status": "failed", "reason": "Connection failed (both SSH and Telnet)"}
+        return {"ip": ip, "status": "failed", "reason": "Connection failed (both SSH and Telnet)"}, run_dir
 
     device_data = {
         "ip": ip,
@@ -222,7 +220,7 @@ def crawl_device(ip, ports, username, password, timestamp):
 
         # 1. Version information
         sh_ver = conn.send_command('show version')
-        with open(os.path.join(raw_logs_dir, f"{ip}_show_version.log"), "w") as f:
+        with open(os.path.join(raw_logs_dir, f"{ip}_show_version.log"), "w", encoding="utf-8") as f:
             f.write(sh_ver)
         ver_data = juniper_parser.parse_juniper_show_version(sh_ver)
         device_data.update(ver_data)
@@ -231,7 +229,7 @@ def crawl_device(ip, ports, username, password, timestamp):
 
         # 2. Chassis Hardware
         sh_hw = conn.send_command('show chassis hardware')
-        with open(os.path.join(raw_logs_dir, f"{ip}_show_chassis_hardware.log"), "w") as f:
+        with open(os.path.join(raw_logs_dir, f"{ip}_show_chassis_hardware.log"), "w", encoding="utf-8") as f:
             f.write(sh_hw)
         hw_data = juniper_parser.parse_juniper_chassis_hardware(sh_hw)
         if not device_data["model"] and hw_data.get("model"):
@@ -263,16 +261,23 @@ def crawl_device(ip, ports, username, password, timestamp):
         # 8. Configuration
         sh_config = conn.send_command('show configuration | display set')
         device_data["raw_config"] = sh_config
-        with open(os.path.join(raw_logs_dir, f"{ip}_configuration.cfg"), "w") as f:
+        with open(os.path.join(raw_logs_dir, f"{ip}_configuration.cfg"), "w", encoding="utf-8") as f:
             f.write(sh_config)
             
         filename_hostname = device_data["hostname"] or ip
         backup_filename = f"{filename_hostname}_backup_{timestamp}.cfg"
-        with open(os.path.join(backups_dir, backup_filename), "w") as f:
+        with open(os.path.join(backups_dir, backup_filename), "w", encoding="utf-8") as f:
             f.write(sh_config)
 
         device_data["services"] = juniper_parser.parse_juniper_services(sh_config)
         device_data["is_els"] = detect_els(sh_config)
+        device_data["vlans"] = juniper_parser.parse_juniper_vlans(sh_config)
+        device_data["irb_l3"] = juniper_parser.parse_juniper_irb_l3(sh_config)
+        device_data["routing_instances"] = juniper_parser.parse_juniper_routing_instances(sh_config)
+        device_data["firewall_filters"] = juniper_parser.parse_juniper_firewall_filters(sh_config)
+        device_data["dhcp_services"] = juniper_parser.parse_juniper_dhcp_services(sh_config)
+        device_data["static_routes"] = juniper_parser.parse_juniper_static_routes(sh_config)
+        device_data["audit_issues"] = juniper_parser.audit_juniper_config(sh_config)
 
         print(f"[{ip}] Scanned successfully. Hostname: {device_data['hostname']}, Model: {device_data['model']}")
     except Exception as e:
@@ -290,6 +295,10 @@ def main():
     parser_arg.add_argument("--retry", help="Retry failed scan IPs using a JSON failure log file")
     args = parser_arg.parse_args()
 
+    print("\n--- Credentials Input ---")
+    username = input("Enter SSH/Telnet username: ").strip()
+    password = getpass.getpass("Enter password: ")
+
     if not os.path.exists(oui_lookup.OUI_FILE):
         oui_lookup.download_oui_db()
 
@@ -302,7 +311,7 @@ def main():
             print(f"Error: Retry file {args.retry} does not exist.")
             sys.exit(1)
         try:
-            with open(args.retry, 'r') as f:
+            with open(args.retry, 'r', encoding="utf-8") as f:
                 failed_data = json.load(f)
                 targets_ips = failed_data.get("failed_ips", [])
                 print(f"Loaded {len(targets_ips)} failed hosts from {args.retry} for retry.")
@@ -365,9 +374,6 @@ def main():
         sys.exit(1)
 
     print(f"\n[✓] Discovered active host: {first_host['ip']} (Open ports: {first_host['ports']})")
-    print("\n--- Phase 2: Credentials Input ---")
-    username = input("Enter SSH/Telnet username: ").strip()
-    password = getpass.getpass("Enter password: ")
 
     print("\n--- Phase 3: Switch Discovery Crawl (Concurrently scanning in background) ---")
     scanned_devices = {}
@@ -428,9 +434,15 @@ def main():
             "failed_ips": failed_ips_list,
             "details": failed_devices
         }
-        with open("juniper_failed_hosts.json", "w") as f:
+        with open("juniper_failed_hosts.json", "w", encoding="utf-8") as f:
             json.dump(failed_log, f, indent=4)
-        print(f"\nWARNING: {len(failed_ips_list)} devices failed or partial-scanned. Details saved to juniper_failed_hosts.json")
+        run_failed_hosts_path = os.path.join(run_dir, "juniper_failed_hosts.json")
+        with open(run_failed_hosts_path, "w", encoding="utf-8") as f:
+            json.dump(failed_log, f, indent=4)
+        print(f"\nWARNING: {len(failed_ips_list)} devices failed or partial-scanned.")
+        print(f"Details saved to:")
+        print(f"  - juniper_failed_hosts.json (workspace root)")
+        print(f"  - {run_failed_hosts_path}")
 
     print("\nNetwork Discovery Complete!")
     print(f"Successfully Scanned: {len(scanned_devices)}")

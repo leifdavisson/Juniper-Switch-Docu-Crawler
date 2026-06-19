@@ -259,3 +259,295 @@ def parse_juniper_services(config):
         services[key] = list(set(services[key]))
         
     return services
+
+def parse_juniper_vlans(config):
+    vlans = {}
+    for line in config.splitlines():
+        line = line.strip()
+        match_id = re.match(r'^set vlans\s+(\S+)\s+vlan-id\s+(\d+)', line)
+        if match_id:
+            name = match_id.group(1)
+            vlan_id = int(match_id.group(2))
+            if name not in vlans:
+                vlans[name] = {"name": name, "vlan_id": vlan_id, "l3_interface": ""}
+            else:
+                vlans[name]["vlan_id"] = vlan_id
+            continue
+            
+        match_l3 = re.match(r'^set vlans\s+(\S+)\s+l3-interface\s+(\S+)', line)
+        if match_l3:
+            name = match_l3.group(1)
+            l3_int = match_l3.group(2)
+            if name not in vlans:
+                vlans[name] = {"name": name, "vlan_id": None, "l3_interface": l3_int}
+            else:
+                vlans[name]["l3_interface"] = l3_int
+    return list(vlans.values())
+
+def parse_juniper_irb_l3(config):
+    l3_ints = {}
+    for line in config.splitlines():
+        line = line.strip()
+        match_addr = re.match(r'^set interfaces\s+(\S+)\s+unit\s+(\d+)\s+family\s+inet\s+address\s+(\S+)', line)
+        if match_addr:
+            name = f"{match_addr.group(1)}.{match_addr.group(2)}"
+            ip = match_addr.group(3)
+            if name not in l3_ints:
+                l3_ints[name] = {"interface": name, "ip_address": ip, "dhcp": False, "description": ""}
+            else:
+                l3_ints[name]["ip_address"] = ip
+            continue
+            
+        match_dhcp = re.match(r'^set interfaces\s+(\S+)\s+unit\s+(\d+)\s+family\s+inet\s+dhcp', line)
+        if match_dhcp:
+            name = f"{match_dhcp.group(1)}.{match_dhcp.group(2)}"
+            if name not in l3_ints:
+                l3_ints[name] = {"interface": name, "ip_address": "dhcp", "dhcp": True, "description": ""}
+            else:
+                l3_ints[name]["ip_address"] = "dhcp"
+                l3_ints[name]["dhcp"] = True
+            continue
+
+        match_desc = re.match(r'^set interfaces\s+(\S+)\s+unit\s+(\d+)\s+description\s+(.+)', line)
+        if match_desc:
+            name = f"{match_desc.group(1)}.{match_desc.group(2)}"
+            desc = match_desc.group(3).strip('"')
+            if name not in l3_ints:
+                l3_ints[name] = {"interface": name, "ip_address": "", "dhcp": False, "description": desc}
+            else:
+                l3_ints[name]["description"] = desc
+    return list(l3_ints.values())
+
+def parse_juniper_routing_instances(config):
+    instances = {}
+    for line in config.splitlines():
+        line = line.strip()
+        if not line.startswith("set routing-instances"):
+            continue
+        match_type = re.match(r'^set routing-instances\s+(\S+)\s+instance-type\s+(\S+)', line)
+        if match_type:
+            name = match_type.group(1)
+            itype = match_type.group(2)
+            if name not in instances:
+                instances[name] = {"name": name, "type": itype, "interfaces": [], "routes": []}
+            else:
+                instances[name]["type"] = itype
+            continue
+            
+        match_int = re.match(r'^set routing-instances\s+(\S+)\s+interface\s+(\S+)', line)
+        if match_int:
+            name = match_int.group(1)
+            iface = match_int.group(2)
+            if name not in instances:
+                instances[name] = {"name": name, "type": "", "interfaces": [iface], "routes": []}
+            else:
+                instances[name]["interfaces"].append(iface)
+            continue
+            
+        match_route = re.match(r'^set routing-instances\s+(\S+)\s+routing-options\s+static\s+route\s+(\S+)\s+next-hop\s+(\S+)', line)
+        if match_route:
+            name = match_route.group(1)
+            subnet = match_route.group(2)
+            nh = match_route.group(3)
+            route_info = {"subnet": subnet, "next_hop": nh}
+            if name not in instances:
+                instances[name] = {"name": name, "type": "", "interfaces": [], "routes": [route_info]}
+            else:
+                instances[name]["routes"].append(route_info)
+    for inst in instances.values():
+        inst["interfaces"] = list(set(inst["interfaces"]))
+    return list(instances.values())
+
+def parse_juniper_firewall_filters(config):
+    filters = {}
+    for line in config.splitlines():
+        line = line.strip()
+        if not line.startswith("set firewall"):
+            continue
+        match_term = re.match(r'^set firewall\s+(?:family\s+\S+\s+)?filter\s+(\S+)\s+term\s+(\S+)\s+(from|then)\s+(.+)', line)
+        if match_term:
+            filter_name = match_term.group(1)
+            term_name = match_term.group(2)
+            direction = match_term.group(3)
+            action_detail = match_term.group(4)
+            
+            if filter_name not in filters:
+                filters[filter_name] = {"name": filter_name, "terms": {}}
+            if term_name not in filters[filter_name]["terms"]:
+                filters[filter_name]["terms"][term_name] = {"name": term_name, "from": [], "then": []}
+                
+            if direction == "from":
+                filters[filter_name]["terms"][term_name]["from"].append(action_detail)
+            else:
+                filters[filter_name]["terms"][term_name]["then"].append(action_detail)
+    
+    result = []
+    for f_name, f_data in filters.items():
+        terms_list = []
+        for t_name, t_data in f_data["terms"].items():
+            terms_list.append(t_data)
+        result.append({"name": f_name, "terms": terms_list})
+    return result
+
+def parse_juniper_dhcp_services(config):
+    dhcp_services = {
+        "relays": [],
+        "local_pools": []
+    }
+    
+    relay_groups = {}
+    local_pools = {}
+    
+    for line in config.splitlines():
+        line = line.strip()
+        match_relay_srv = re.match(r'^set forwarding-options\s+dhcp-relay\s+server-group\s+(\S+)\s+(\S+)', line)
+        if match_relay_srv:
+            group = match_relay_srv.group(1)
+            srv = match_relay_srv.group(2)
+            if group not in relay_groups:
+                relay_groups[group] = {"group": group, "servers": [srv], "interfaces": []}
+            else:
+                relay_groups[group]["servers"].append(srv)
+            continue
+            
+        match_relay_int = re.match(r'^set forwarding-options\s+dhcp-relay\s+group\s+(\S+)\s+interface\s+(\S+)', line)
+        if match_relay_int:
+            group = match_relay_int.group(1)
+            iface = match_relay_int.group(2)
+            if group not in relay_groups:
+                relay_groups[group] = {"group": group, "servers": [], "interfaces": [iface]}
+            else:
+                relay_groups[group]["interfaces"].append(iface)
+            continue
+            
+        match_bootp_srv = re.match(r'^set forwarding-options\s+helpers\s+bootp\s+server\s+(\S+)', line)
+        if match_bootp_srv:
+            srv = match_bootp_srv.group(1)
+            if "bootp" not in relay_groups:
+                relay_groups["bootp"] = {"group": "bootp_helper", "servers": [srv], "interfaces": []}
+            else:
+                relay_groups["bootp"]["servers"].append(srv)
+            continue
+        match_bootp_int = re.match(r'^set forwarding-options\s+helpers\s+bootp\s+interface\s+(\S+)', line)
+        if match_bootp_int:
+            iface = match_bootp_int.group(1)
+            if "bootp" not in relay_groups:
+                relay_groups["bootp"] = {"group": "bootp_helper", "servers": [], "interfaces": [iface]}
+            else:
+                relay_groups["bootp"]["interfaces"].append(iface)
+            continue
+            
+        match_pool_net = re.match(r'^set access\s+address-assignment\s+pool\s+(\S+)\s+family\s+inet\s+network\s+(\S+)', line)
+        if match_pool_net:
+            pool = match_pool_net.group(1)
+            net = match_pool_net.group(2)
+            if pool not in local_pools:
+                local_pools[pool] = {"pool": pool, "network": net, "range_low": "", "range_high": "", "router": ""}
+            else:
+                local_pools[pool]["network"] = net
+            continue
+            
+        match_pool_low = re.match(r'^set access\s+address-assignment\s+pool\s+(\S+)\s+family\s+inet\s+range\s+\S+\s+low\s+(\S+)', line)
+        if match_pool_low:
+            pool = match_pool_low.group(1)
+            val = match_pool_low.group(2)
+            if pool not in local_pools:
+                local_pools[pool] = {"pool": pool, "network": "", "range_low": val, "range_high": "", "router": ""}
+            else:
+                local_pools[pool]["range_low"] = val
+            continue
+            
+        match_pool_high = re.match(r'^set access\s+address-assignment\s+pool\s+(\S+)\s+family\s+inet\s+range\s+\S+\s+high\s+(\S+)', line)
+        if match_pool_high:
+            pool = match_pool_high.group(1)
+            val = match_pool_high.group(2)
+            if pool not in local_pools:
+                local_pools[pool] = {"pool": pool, "network": "", "range_low": "", "range_high": val, "router": ""}
+            else:
+                local_pools[pool]["range_high"] = val
+            continue
+            
+        match_pool_rt = re.match(r'^set access\s+address-assignment\s+pool\s+(\S+)\s+family\s+inet\s+dhcp-attributes\s+router\s+(\S+)', line)
+        if match_pool_rt:
+            pool = match_pool_rt.group(1)
+            val = match_pool_rt.group(2)
+            if pool not in local_pools:
+                local_pools[pool] = {"pool": pool, "network": "", "range_low": "", "range_high": "", "router": val}
+            else:
+                local_pools[pool]["router"] = val
+            continue
+            
+    for g in relay_groups.values():
+        g["servers"] = list(set(g["servers"]))
+        g["interfaces"] = list(set(g["interfaces"]))
+        dhcp_services["relays"].append(g)
+    for p in local_pools.values():
+        dhcp_services["local_pools"].append(p)
+    return dhcp_services
+
+def parse_juniper_static_routes(config):
+    routes = []
+    for line in config.splitlines():
+        line = line.strip()
+        if line.startswith("set routing-options static route"):
+            match_rt = re.match(r'^set routing-options\s+static\s+route\s+(\S+)\s+next-hop\s+(\S+)', line)
+            if match_rt:
+                routes.append({
+                    "subnet": match_rt.group(1),
+                    "next_hop": match_rt.group(2)
+                })
+    return routes
+
+def audit_juniper_config(config):
+    issues = []
+    
+    if re.search(r'set snmp community public\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "High",
+            "item": "Default SNMP Community String",
+            "detail": "SNMP community 'public' is configured. This is a common security risk."
+        })
+        
+    if re.search(r'set system services ssh root-login allow\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "Medium",
+            "item": "SSH Root Login Enabled",
+            "detail": "Direct root SSH login is allowed. It is recommended to use user accounts and sudo/su."
+        })
+        
+    if re.search(r'set system services telnet\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "High",
+            "item": "Telnet Enabled",
+            "detail": "Telnet protocol is enabled. Telnet transmits credentials in plain text. Use SSH instead."
+        })
+        
+    if not re.search(r'set system ntp server\b', config):
+        issues.append({
+            "category": "Best Practice",
+            "severity": "Low",
+            "item": "NTP Not Configured",
+            "detail": "No network time protocol (NTP) servers are configured. Accurate clocks are vital for syslog."
+        })
+        
+    if not re.search(r'set system syslog\b', config):
+        issues.append({
+            "category": "Best Practice",
+            "severity": "Medium",
+            "item": "Syslog Not Configured",
+            "detail": "Remote or local syslog logging is not configured, leaving logs volatile."
+        })
+        
+    if not (re.search(r'set protocols rstp\b', config) or re.search(r'set protocols mstp\b', config) or re.search(r'set protocols stp\b', config)):
+        issues.append({
+            "category": "Resiliency",
+            "severity": "High",
+            "item": "Spanning Tree Disabled",
+            "detail": "No Spanning Tree Protocol (STP/RSTP/MSTP) was detected in protocols configuration. Risk of network loops."
+        })
+        
+    return issues
+
