@@ -34,26 +34,23 @@ def generate_l2_diagram(devices, run_dir):
     with open(filepath, "w", encoding="utf-8") as f:
         f.write("# Juniper L2 Network Diagram\n\n")
         f.write("```mermaid\n")
-        f.write("graph TD;\n")
+        f.write("mindmap\n")
+        f.write("    root((Network L2 Neighbors))\n")
         
-        edges = set()
         for ip, dev in devices.items():
             if dev.get("status") != "success":
                 continue
             host = dev.get("hostname", ip)
             host_id = sanitize_node_id(host)
-            f.write(f'    {host_id}["{host}\\n{dev.get("model", "Unknown")}"]\n')
+            f.write(f'        {host_id}["{host}\\n{dev.get("model", "Unknown")}"]\n')
             
             for n in dev.get("neighbors", []):
                 remote = n.get("remote_device", "Unknown")
-                remote_id = sanitize_node_id(remote)
                 lport = n.get("local_port", "")
                 rport = n.get("remote_port", "")
-                edge = f'    {host_id} -- "{lport} to {rport}" --> {remote_id}["{remote}"];\n'
-                edges.add(edge)
+                neighbor_node_id = sanitize_node_id(f"{host}_{remote}")
+                f.write(f'            {neighbor_node_id}["{remote}\\n({lport} to {rport})"]\n')
                 
-        for edge in edges:
-            f.write(edge)
         f.write("```\n")
     print(f"Generated L2 Diagram: {filepath}")
 
@@ -62,20 +59,21 @@ def generate_l3_diagram(devices, run_dir):
     with open(filepath, "w", encoding="utf-8") as f:
         f.write("# Juniper L3 Network Diagram\n\n")
         f.write("```mermaid\n")
-        f.write("graph TD;\n")
+        f.write("mindmap\n")
+        f.write("    root((Network L3 Interfaces))\n")
         
         for ip, dev in devices.items():
             if dev.get("status") != "success":
                 continue
             host = dev.get("hostname", ip)
             host_id = sanitize_node_id(host)
-            f.write(f'    {host_id}["{host} - {ip}"]\n')
+            f.write(f'        {host_id}["{host} - {ip}"]\n')
             
             for l3 in dev.get("l3_interfaces", []):
                 subnet = l3.get("ip_address", "")
                 if subnet and subnet != "unassigned":
                     subnet_id = sanitize_node_id(subnet)
-                    f.write(f'    {host_id} --- {subnet_id}["{subnet}"]\n')
+                    f.write(f'            {subnet_id}["{subnet}"]\n')
                     
         f.write("```\n")
     print(f"Generated L3 Diagram: {filepath}")
