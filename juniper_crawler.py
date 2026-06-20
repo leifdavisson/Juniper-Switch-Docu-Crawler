@@ -180,6 +180,14 @@ def detect_model_series(model):
         return "SRX"
     return "EX"
 
+def send_command_paced(conn, command, mgmt_method):
+    if mgmt_method == "Telnet":
+        time.sleep(1.0)
+    res = conn.send_command(command)
+    if mgmt_method == "Telnet":
+        time.sleep(0.5)
+    return res
+
 def crawl_device(ip, ports, username, password, timestamp):
     conn = None
     mgmt_method = None
@@ -235,10 +243,10 @@ def crawl_device(ip, ports, username, password, timestamp):
 
     try:
         # Disable CLI paging
-        conn.send_command('set cli screen-length 0')
+        send_command_paced(conn, 'set cli screen-length 0', mgmt_method)
 
         # 1. Version information
-        sh_ver = conn.send_command('show version')
+        sh_ver = send_command_paced(conn, 'show version', mgmt_method)
         with open(os.path.join(raw_logs_dir, f"{ip}_show_version.log"), "w", encoding="utf-8") as f:
             f.write(sh_ver)
         ver_data = juniper_parser.parse_juniper_show_version(sh_ver)
@@ -247,7 +255,7 @@ def crawl_device(ip, ports, username, password, timestamp):
             device_data["hostname"] = conn.find_prompt().split('@')[1].replace('>', '').replace('#', '').strip()
 
         # 2. Chassis Hardware
-        sh_hw = conn.send_command('show chassis hardware')
+        sh_hw = send_command_paced(conn, 'show chassis hardware', mgmt_method)
         with open(os.path.join(raw_logs_dir, f"{ip}_show_chassis_hardware.log"), "w", encoding="utf-8") as f:
             f.write(sh_hw)
         hw_data = juniper_parser.parse_juniper_chassis_hardware(sh_hw)
@@ -257,15 +265,15 @@ def crawl_device(ip, ports, username, password, timestamp):
             device_data["serial"] = hw_data["serial"]
 
         # 3. Interfaces Terse
-        sh_int_terse = conn.send_command('show interfaces terse')
+        sh_int_terse = send_command_paced(conn, 'show interfaces terse', mgmt_method)
         device_data["l3_interfaces"] = juniper_parser.parse_juniper_interfaces_terse(sh_int_terse)
 
         # 4. Interfaces Details
-        sh_ints = conn.send_command('show interfaces')
+        sh_ints = send_command_paced(conn, 'show interfaces', mgmt_method)
         device_data["interfaces_detail"] = juniper_parser.parse_juniper_show_interfaces(sh_ints)
 
         # 5. LLDP Neighbors
-        sh_lldp = conn.send_command('show lldp neighbors detail')
+        sh_lldp = send_command_paced(conn, 'show lldp neighbors detail', mgmt_method)
         device_data["neighbors"] = juniper_parser.parse_juniper_lldp_neighbors_detail(sh_lldp)
 
         model_series = detect_model_series(device_data["model"])
@@ -274,8 +282,8 @@ def crawl_device(ip, ports, username, password, timestamp):
         # 6. Spanning Tree (EX and QFX only)
         if model_series in ("EX", "QFX"):
             try:
-                sh_stp_bridge = conn.send_command('show spanning-tree bridge')
-                sh_stp_int = conn.send_command('show spanning-tree interface')
+                sh_stp_bridge = send_command_paced(conn, 'show spanning-tree bridge', mgmt_method)
+                sh_stp_int = send_command_paced(conn, 'show spanning-tree interface', mgmt_method)
                 device_data["stp"] = juniper_parser.parse_juniper_spanning_tree(sh_stp_bridge, sh_stp_int)
             except Exception as e:
                 print(f"[{ip}] Spanning tree query failed: {e}")
@@ -284,18 +292,18 @@ def crawl_device(ip, ports, username, password, timestamp):
             device_data["stp"] = {"enabled": False, "vlans": {}}
 
         # 7. Route
-        sh_route = conn.send_command('show route')
+        sh_route = send_command_paced(conn, 'show route', mgmt_method)
         device_data["routes"] = juniper_parser.parse_juniper_show_route(sh_route)
 
         # 7b. OSPF and BGP (MX, SRX, QFX)
         if model_series in ("MX", "SRX", "QFX"):
             try:
-                sh_ospf = conn.send_command('show ospf neighbor')
+                sh_ospf = send_command_paced(conn, 'show ospf neighbor', mgmt_method)
                 device_data["ospf_neighbors"] = juniper_parser.parse_juniper_ospf_neighbors(sh_ospf)
             except Exception as e:
                 pass
             try:
-                sh_bgp = conn.send_command('show bgp summary')
+                sh_bgp = send_command_paced(conn, 'show bgp summary', mgmt_method)
                 device_data["bgp_peers"] = juniper_parser.parse_juniper_bgp_summary(sh_bgp)
             except Exception as e:
                 pass
@@ -303,18 +311,18 @@ def crawl_device(ip, ports, username, password, timestamp):
         # 7c. Security Zone & Policies (SRX only)
         if model_series == "SRX":
             try:
-                sh_sec_zones = conn.send_command('show security zones')
+                sh_sec_zones = send_command_paced(conn, 'show security zones', mgmt_method)
                 device_data["security_zones"] = juniper_parser.parse_juniper_security_zones(sh_sec_zones)
             except Exception as e:
                 pass
             try:
-                sh_sec_policies = conn.send_command('show security policies')
+                sh_sec_policies = send_command_paced(conn, 'show security policies', mgmt_method)
                 device_data["security_policies"] = juniper_parser.parse_juniper_security_policies(sh_sec_policies)
             except Exception as e:
                 pass
 
         # 8. Configuration
-        sh_config = conn.send_command('show configuration | display set')
+        sh_config = send_command_paced(conn, 'show configuration | display set', mgmt_method)
         device_data["raw_config"] = sh_config
         with open(os.path.join(raw_logs_dir, f"{ip}_configuration.cfg"), "w", encoding="utf-8") as f:
             f.write(sh_config)
