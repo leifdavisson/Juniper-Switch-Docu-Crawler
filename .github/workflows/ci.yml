@@ -33,3 +33,9 @@ jobs:
       run: |
         # Basic bash syntax check
         bash -n juniper_run.sh
+        if [ -f run.sh ]; then bash -n run.sh; fi
+
+    - name: Run Unit Tests
+      run: |
+        python -m unittest test_juniper_parser.py
+
