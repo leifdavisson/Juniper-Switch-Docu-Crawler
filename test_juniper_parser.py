@@ -64,5 +64,41 @@ From zone: trust, To zone: untrust
         self.assertEqual(res[0]["name"], "default-permit")
         self.assertEqual(res[0]["action"], "permit")
 
+    def test_audit_juniper_config(self):
+        # A mock config with several issues: Telnet enabled, SNMP public, missing NTP/Syslog, etc.
+        config_bad = """
+        set system services telnet
+        set snmp community public
+        """
+        issues = juniper_parser.audit_juniper_config(config_bad)
+        # Check if the Telnet and SNMP community issues are caught
+        items = [issue["item"] for issue in issues]
+        self.assertIn("Telnet Protocol Enabled", items)
+        self.assertIn("Default SNMP Community String (public)", items)
+        self.assertIn("NTP Not Configured", items)
+        self.assertIn("Syslog Not Configured", items)
+
+        # A clean config adhering to STIG guidelines
+        config_good = """
+        set system services ssh root-login deny
+        set system services ssh connection-limit 5
+        set system services ssh client-alive-interval 300
+        set system login message "Authorized Users Only"
+        set system ntp server 10.0.0.1
+        set system ntp authentication-key 1 type sha256 value "secret"
+        set system syslog host 10.0.0.2 any any
+        set system syslog host 10.0.0.2 interactive-commands any
+        set system no-redirects
+        set system internet-options tcp-drop-synfin-set
+        set system internet-options icmpv4-rate-limit packet-rate 50
+        set protocols rstp
+        set system tacplus-server 10.0.0.3
+        set snmp v3
+        """
+        issues_good = juniper_parser.audit_juniper_config(config_good)
+        # It should contain no issues
+        self.assertEqual(len(issues_good), 0)
+
 if __name__ == '__main__':
     unittest.main()
+

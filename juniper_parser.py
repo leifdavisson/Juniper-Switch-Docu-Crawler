@@ -501,38 +501,115 @@ def parse_juniper_static_routes(config):
 def audit_juniper_config(config):
     issues = []
     
+    # 1. SNMP Checks
     if re.search(r'set snmp community public\b', config):
         issues.append({
             "category": "Security",
             "severity": "High",
-            "item": "Default SNMP Community String",
+            "item": "Default SNMP Community String (public)",
             "detail": "SNMP community 'public' is configured. This is a common security risk."
         })
-        
-    if re.search(r'set system services ssh root-login allow\b', config):
+    if re.search(r'set snmp community private\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "High",
+            "item": "Default SNMP Community String (private)",
+            "detail": "SNMP community 'private' is configured. This is a common security risk."
+        })
+    if re.search(r'set snmp community\s+\S+\b', config) and not re.search(r'set snmp v3\b', config):
         issues.append({
             "category": "Security",
             "severity": "Medium",
-            "item": "SSH Root Login Enabled",
-            "detail": "Direct root SSH login is allowed. It is recommended to use user accounts and sudo/su."
+            "item": "Legacy SNMP v1/v2c Configured",
+            "detail": "SNMP v1/v2c community strings are configured. DISA STIG mandates SNMPv3 with USM authentication/encryption."
         })
-        
+
+    # 2. Insecure Services
     if re.search(r'set system services telnet\b', config):
         issues.append({
             "category": "Security",
             "severity": "High",
-            "item": "Telnet Enabled",
+            "item": "Telnet Protocol Enabled",
             "detail": "Telnet protocol is enabled. Telnet transmits credentials in plain text. Use SSH instead."
         })
-        
+    if re.search(r'set system services ftp\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "High",
+            "item": "FTP Service Enabled",
+            "detail": "FTP service is enabled. FTP transmits credentials and files in cleartext. SFTP/SCP should be used instead."
+        })
+    if re.search(r'set system services web-management http\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "High",
+            "item": "Insecure HTTP Web Management Enabled",
+            "detail": "Unencrypted HTTP web management is enabled. Use HTTPS or disable web-management completely."
+        })
+
+    # 3. SSH Configuration Hardening
+    if re.search(r'set system services ssh root-login allow\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "Medium",
+            "item": "SSH Root Login Allowed",
+            "detail": "Direct root SSH login is allowed. Direct root access bypasses individual accountability. Recommend setting 'root-login deny'."
+        })
+    elif not re.search(r'set system services ssh root-login (deny|deny-password)\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "Low",
+            "item": "SSH Root Login Not Hardened",
+            "detail": "SSH root-login is not explicitly configured to 'deny' or 'deny-password'. Direct root logins should be explicitly disabled."
+        })
+    if re.search(r'set system services ssh protocol-version v1\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "High",
+            "item": "SSH Protocol v1 Enabled",
+            "detail": "Deprecated SSH Protocol Version 1 is enabled. DISA STIG requires forcing SSHv2 only."
+        })
+    if not re.search(r'set system services ssh connection-limit\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "Medium",
+            "item": "SSH Connection Limit Not Set",
+            "detail": "No SSH connection-limit is configured. Limiting simultaneous SSH sessions reduces DoS risk (STIG recommends limit <= 5)."
+        })
+    if not re.search(r'set system services ssh client-alive-interval\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "Low",
+            "item": "SSH Client Alive Interval Not Configured",
+            "detail": "SSH client-alive-interval is not configured. Configured timeouts ensure inactive sessions are terminated."
+        })
+
+    # 4. System Banners (Legal Disclaimer)
+    if not (re.search(r'set system login message\b', config) or re.search(r'set system login announcement\b', config)):
+        issues.append({
+            "category": "Security",
+            "severity": "Medium",
+            "item": "Missing Login Warning Banner",
+            "detail": "No system login message/announcement configured. DISA STIG mandates displaying a Notice and Consent Banner before user authentication."
+        })
+
+    # 5. Network Time Protocol (NTP)
     if not re.search(r'set system ntp server\b', config):
         issues.append({
             "category": "Best Practice",
             "severity": "Low",
             "item": "NTP Not Configured",
-            "detail": "No network time protocol (NTP) servers are configured. Accurate clocks are vital for syslog."
+            "detail": "No network time protocol (NTP) servers are configured. Accurate clocks are vital for syslog correlation."
         })
-        
+    elif not re.search(r'set system ntp authentication-key\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "Medium",
+            "item": "NTP Authentication Missing",
+            "detail": "NTP servers are configured, but NTP authentication-key is missing. Unauthenticated time sources are vulnerable to spoofing."
+        })
+
+    # 6. Auditing & Logging (Syslog)
     if not re.search(r'set system syslog\b', config):
         issues.append({
             "category": "Best Practice",
@@ -540,7 +617,46 @@ def audit_juniper_config(config):
             "item": "Syslog Not Configured",
             "detail": "Remote or local syslog logging is not configured, leaving logs volatile."
         })
-        
+    else:
+        if not re.search(r'set system syslog host\b', config):
+            issues.append({
+                "category": "Security",
+                "severity": "Medium",
+                "item": "Remote Syslog Host Missing",
+                "detail": "Syslog is configured locally but no remote syslog host target is defined. Critical logs should be streamed off-box."
+            })
+        if not re.search(r'set system syslog (host \S+|file \S+) interactive-commands\b', config):
+            issues.append({
+                "category": "Security",
+                "severity": "Medium",
+                "item": "Interactive Commands Logging Missing",
+                "detail": "Logging of operator command history (interactive-commands) is not configured. Audit trails must track administrative activity."
+            })
+
+    # 7. Control Plane Hardening (Internet Options & Filters)
+    if not re.search(r'set system no-redirects\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "Low",
+            "item": "ICMP Redirects Not Disabled",
+            "detail": "ICMP redirects are not explicitly disabled. Devices should ignore redirect messages to prevent route hijacking."
+        })
+    if not re.search(r'set system internet-options tcp-drop-synfin-set\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "Low",
+            "item": "TCP SYN-FIN Scan Defense Disabled",
+            "detail": "Junos is not configured to drop TCP SYN-FIN packets, allowing malicious host scanning."
+        })
+    if not re.search(r'set system internet-options icmpv4-rate-limit\b', config):
+        issues.append({
+            "category": "Security",
+            "severity": "Low",
+            "item": "ICMPv4 Rate Limiting Not Set",
+            "detail": "Control plane ICMPv4 packet rate limit is not configured. Enforcing rate-limiting mitigates flood DoS attacks."
+        })
+
+    # 8. Loop Prevention (Spanning Tree)
     if not (re.search(r'set protocols rstp\b', config) or re.search(r'set protocols mstp\b', config) or re.search(r'set protocols stp\b', config)):
         issues.append({
             "category": "Resiliency",
@@ -548,7 +664,16 @@ def audit_juniper_config(config):
             "item": "Spanning Tree Disabled",
             "detail": "No Spanning Tree Protocol (STP/RSTP/MSTP) was detected in protocols configuration. Risk of network loops."
         })
-        
+
+    # 9. Control Plane AAA
+    if not (re.search(r'set system tacplus-server\b', config) or re.search(r'set system radius-server\b', config)):
+        issues.append({
+            "category": "Security",
+            "severity": "Medium",
+            "item": "Centralized AAA Authentication Missing",
+            "detail": "No TACACS+ or RADIUS server configuration detected. Administrative access should use centralized authentication."
+        })
+
     return issues
 
 
