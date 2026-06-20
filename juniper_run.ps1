@@ -303,6 +303,32 @@ function Retry-Scan {
     }
 }
 
+function Save-Baseline {
+    if (-not $global:PythonCmd) {
+        Write-Host "[!] Error: Python 3 must be installed." -ForegroundColor Red
+        return
+    }
+    $file = Read-Host "Enter baseline output filename [default: juniper_baseline.json]"
+    if (-not $file) { $file = "juniper_baseline.json" }
+    Write-Host "`n[*] Starting scan and saving state to $file..." -ForegroundColor Cyan
+    & $global:PythonCmd juniper_crawler.py --save-baseline $file
+}
+
+function Run-Compare-Baseline {
+    if (-not $global:PythonCmd) {
+        Write-Host "[!] Error: Python 3 must be installed." -ForegroundColor Red
+        return
+    }
+    $file = Read-Host "Enter baseline input filename [default: juniper_baseline.json]"
+    if (-not $file) { $file = "juniper_baseline.json" }
+    if (-not (Test-Path $file)) {
+        Write-Host "[!] Baseline file $file does not exist. Save a baseline first." -ForegroundColor Red
+        return
+    }
+    Write-Host "`n[*] Starting scan and comparing state to $file..." -ForegroundColor Cyan
+    & $global:PythonCmd juniper_crawler.py --compare-baseline $file
+}
+
 function List-Backups {
     Write-Host "`n[*] Checking configuration backups..." -ForegroundColor Cyan
     # Juniper backups are inside outputs/juniper_run_*/backups/
@@ -334,28 +360,32 @@ while ($true) {
     Write-Host "  2) " -NoNewline; Write-Host "Run New Discovery Scan" -ForegroundColor Green
     Write-Host "  3) " -NoNewline; Write-Host "Retry/Resume Failed Devices" -ForegroundColor Green -NoNewline; Write-Host " (Loads juniper_failed_hosts.json)"
     Write-Host "  4) " -NoNewline; Write-Host "List Current Backups" -ForegroundColor Green
-    Write-Host "  5) " -NoNewline; Write-Host "Install Nmap Utility" -ForegroundColor Green -NoNewline; Write-Host " (Optional)"
-    Write-Host "  6) " -NoNewline; Write-Host "Exit" -ForegroundColor Red
+    Write-Host "  5) " -NoNewline; Write-Host "Save Baseline State" -ForegroundColor Green
+    Write-Host "  6) " -NoNewline; Write-Host "Run Discovery & Compare to Baseline" -ForegroundColor Green
+    Write-Host "  7) " -NoNewline; Write-Host "Install Nmap Utility" -ForegroundColor Green -NoNewline; Write-Host " (Optional)"
+    Write-Host "  8) " -NoNewline; Write-Host "Exit" -ForegroundColor Red
     Write-Host "----------------------------------------------------------------"
 
-    $selection = Read-Host "Select option (1-6)"
+    $selection = Read-Host "Select option (1-8)"
 
     switch ($selection) {
         "1" { Install-Dependencies }
         "2" { Run-Discovery }
         "3" { Retry-Scan }
         "4" { List-Backups }
-        "5" { Install-Nmap }
-        "6" { 
+        "5" { Save-Baseline }
+        "6" { Run-Compare-Baseline }
+        "7" { Install-Nmap }
+        "8" { 
             Write-Host "`nExiting Windows Operator Shell. Goodbye!`n" -ForegroundColor Green
             break
         }
         default {
-            Write-Host "[!] Invalid selection. Please choose a number between 1 and 6." -ForegroundColor Red
+            Write-Host "[!] Invalid selection. Please choose a number between 1 and 8." -ForegroundColor Red
         }
     }
 
-    if ($selection -eq "6") { break }
+    if ($selection -eq "8") { break }
 
     Write-Host "`nPress [Enter] to return to the menu..."
     Read-Host

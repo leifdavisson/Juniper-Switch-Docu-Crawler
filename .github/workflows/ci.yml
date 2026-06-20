@@ -27,9 +27,9 @@ jobs:
 
     - name: Verify Python Syntax
       run: |
-        python -m py_compile cisco_crawler.py parser.py report_generator.py oui_lookup.py
+        python -m py_compile juniper_crawler.py juniper_parser.py juniper_report_generator.py oui_lookup.py
 
     - name: Verify Shell Scripts Syntax
       run: |
         # Basic bash syntax check
-        bash -n run.sh
+        bash -n juniper_run.sh

@@ -166,6 +166,20 @@ def detect_els(config):
         # also vlan configuration syntax differences exist, but IRB is a good marker
     return False
 
+def detect_model_series(model):
+    if not model:
+        return "EX"
+    model_upper = model.upper()
+    if "EX" in model_upper:
+        return "EX"
+    elif "QFX" in model_upper:
+        return "QFX"
+    elif "MX" in model_upper:
+        return "MX"
+    elif "SRX" in model_upper:
+        return "SRX"
+    return "EX"
+
 def crawl_device(ip, ports, username, password, timestamp):
     conn = None
     mgmt_method = None
@@ -201,6 +215,7 @@ def crawl_device(ip, ports, username, password, timestamp):
         "os_type": "junos",
         "hostname": "",
         "model": "",
+        "model_series": "EX",
         "serial": "",
         "firmware": "",
         "mac_address": "",
@@ -210,6 +225,10 @@ def crawl_device(ip, ports, username, password, timestamp):
         "interfaces_detail": {},
         "stp": {},
         "routes": [],
+        "ospf_neighbors": [],
+        "bgp_peers": [],
+        "security_zones": [],
+        "security_policies": [],
         "services": {},
         "raw_config": ""
     }
@@ -249,14 +268,50 @@ def crawl_device(ip, ports, username, password, timestamp):
         sh_lldp = conn.send_command('show lldp neighbors detail')
         device_data["neighbors"] = juniper_parser.parse_juniper_lldp_neighbors_detail(sh_lldp)
 
-        # 6. Spanning Tree Bridge and Interface
-        sh_stp_bridge = conn.send_command('show spanning-tree bridge')
-        sh_stp_int = conn.send_command('show spanning-tree interface')
-        device_data["stp"] = juniper_parser.parse_juniper_spanning_tree(sh_stp_bridge, sh_stp_int)
+        model_series = detect_model_series(device_data["model"])
+        device_data["model_series"] = model_series
+
+        # 6. Spanning Tree (EX and QFX only)
+        if model_series in ("EX", "QFX"):
+            try:
+                sh_stp_bridge = conn.send_command('show spanning-tree bridge')
+                sh_stp_int = conn.send_command('show spanning-tree interface')
+                device_data["stp"] = juniper_parser.parse_juniper_spanning_tree(sh_stp_bridge, sh_stp_int)
+            except Exception as e:
+                print(f"[{ip}] Spanning tree query failed: {e}")
+                device_data["stp"] = {"enabled": False, "vlans": {}}
+        else:
+            device_data["stp"] = {"enabled": False, "vlans": {}}
 
         # 7. Route
         sh_route = conn.send_command('show route')
         device_data["routes"] = juniper_parser.parse_juniper_show_route(sh_route)
+
+        # 7b. OSPF and BGP (MX, SRX, QFX)
+        if model_series in ("MX", "SRX", "QFX"):
+            try:
+                sh_ospf = conn.send_command('show ospf neighbor')
+                device_data["ospf_neighbors"] = juniper_parser.parse_juniper_ospf_neighbors(sh_ospf)
+            except Exception as e:
+                pass
+            try:
+                sh_bgp = conn.send_command('show bgp summary')
+                device_data["bgp_peers"] = juniper_parser.parse_juniper_bgp_summary(sh_bgp)
+            except Exception as e:
+                pass
+
+        # 7c. Security Zone & Policies (SRX only)
+        if model_series == "SRX":
+            try:
+                sh_sec_zones = conn.send_command('show security zones')
+                device_data["security_zones"] = juniper_parser.parse_juniper_security_zones(sh_sec_zones)
+            except Exception as e:
+                pass
+            try:
+                sh_sec_policies = conn.send_command('show security policies')
+                device_data["security_policies"] = juniper_parser.parse_juniper_security_policies(sh_sec_policies)
+            except Exception as e:
+                pass
 
         # 8. Configuration
         sh_config = conn.send_command('show configuration | display set')
@@ -293,6 +348,8 @@ def main():
     parser_arg = argparse.ArgumentParser(description="Juniper Switch Discovery & Documentation Engine")
     parser_arg.add_argument("--subnets", help="Comma-separated target subnets (e.g. 192.168.1.0/24)")
     parser_arg.add_argument("--retry", help="Retry failed scan IPs using a JSON failure log file")
+    parser_arg.add_argument("--save-baseline", help="Save the current operational state as a baseline file")
+    parser_arg.add_argument("--compare-baseline", help="Compare current operational state against a baseline file")
     args = parser_arg.parse_args()
 
     print("\n--- Credentials Input ---")
@@ -424,6 +481,10 @@ def main():
     print("\n--- Phase 4: Generating Deliverables ---")
     if scanned_devices:
         juniper_report_generator.generate_reports(scanned_devices, run_dir)
+        if args.save_baseline:
+            juniper_report_generator.save_baseline_state(scanned_devices, args.save_baseline)
+        if args.compare_baseline:
+            juniper_report_generator.compare_baseline_state(scanned_devices, args.compare_baseline, run_dir)
     else:
         print("No devices were successfully scanned. Skipping reports generation.")
 
