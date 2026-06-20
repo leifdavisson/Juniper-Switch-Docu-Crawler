@@ -551,3 +551,104 @@ def audit_juniper_config(config):
         
     return issues
 
+
+def parse_juniper_ospf_neighbors(output):
+    neighbors = []
+    lines = output.splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("Address") or "Interface" in line:
+            continue
+        parts = line.split()
+        if len(parts) >= 5:
+            neighbors.append({
+                "neighbor_address": parts[0],
+                "interface": parts[1],
+                "state": parts[2],
+                "neighbor_id": parts[3],
+                "priority": parts[4]
+            })
+    return neighbors
+
+
+def parse_juniper_bgp_summary(output):
+    peers = []
+    lines = output.splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("Peer") or line.startswith("Groups:") or line.startswith("Table") or line.startswith("inet.0"):
+            continue
+        parts = line.split()
+        if len(parts) >= 8:
+            peer_ip = parts[0]
+            if re.match(r'^[0-9a-fA-F.:]+$', peer_ip):
+                peers.append({
+                    "peer": peer_ip,
+                    "as": parts[1],
+                    "uptime_dwn": parts[6],
+                    "state": parts[7]
+                })
+    return peers
+
+
+def parse_juniper_security_zones(output):
+    zones = []
+    current_zone = None
+    in_interfaces = False
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("Security zone:"):
+            current_zone = {
+                "name": line.split(":")[1].strip(),
+                "interfaces": []
+            }
+            zones.append(current_zone)
+            in_interfaces = False
+        elif line.startswith("Interfaces:") or line.startswith("Interfaces bound:"):
+            if line.startswith("Interfaces:"):
+                in_interfaces = True
+        elif in_interfaces and line and not line.startswith("Security zone") and ":" not in line:
+            if current_zone:
+                current_zone["interfaces"].append(line)
+        elif ":" in line:
+            in_interfaces = False
+    return zones
+
+
+def parse_juniper_security_policies(output):
+    policies = []
+    current_from = ""
+    current_to = ""
+    current_policy = None
+    for line in output.splitlines():
+        line_strip = line.strip()
+        match_zones = re.match(r'^From zone:\s*(\S+),\s*To zone:\s*(\S+)', line_strip, re.IGNORECASE)
+        if match_zones:
+            current_from = match_zones.group(1).replace(",", "")
+            current_to = match_zones.group(2)
+            continue
+        match_policy = re.match(r'^Policy:\s*(\S+),\s*State:\s*(\S+)', line_strip, re.IGNORECASE)
+        if match_policy:
+            current_policy = {
+                "from_zone": current_from,
+                "to_zone": current_to,
+                "name": match_policy.group(1).replace(",", ""),
+                "state": match_policy.group(2).replace(",", ""),
+                "source": [],
+                "destination": [],
+                "application": [],
+                "action": ""
+            }
+            policies.append(current_policy)
+            continue
+        if current_policy:
+            if line_strip.startswith("Source addresses:"):
+                current_policy["source"] = [x.strip() for x in line_strip.split(":")[1].split(",")]
+            elif line_strip.startswith("Destination addresses:"):
+                current_policy["destination"] = [x.strip() for x in line_strip.split(":")[1].split(",")]
+            elif line_strip.startswith("Applications:"):
+                current_policy["application"] = [x.strip() for x in line_strip.split(":")[1].split(",")]
+            elif line_strip.startswith("Action:"):
+                current_policy["action"] = line_strip.split(":")[1].strip()
+    return policies
+
