@@ -6,6 +6,7 @@ import argparse
 import getpass
 import socket
 import subprocess
+import re
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from netaddr import IPNetwork
@@ -327,7 +328,9 @@ def crawl_device(ip, ports, username, password, timestamp):
         with open(os.path.join(raw_logs_dir, f"{ip}_configuration.cfg"), "w", encoding="utf-8") as f:
             f.write(sh_config)
             
-        filename_hostname = device_data["hostname"] or ip
+        raw_hostname = device_data["hostname"] or ip
+        # Sanitize hostname to prevent path traversal and invalid characters
+        filename_hostname = re.sub(r'[^a-zA-Z0-9_\-.]', '_', os.path.basename(raw_hostname))
         backup_filename = f"{filename_hostname}_backup_{timestamp}.cfg"
         with open(os.path.join(backups_dir, backup_filename), "w", encoding="utf-8") as f:
             f.write(sh_config)
