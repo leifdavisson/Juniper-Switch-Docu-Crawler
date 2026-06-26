@@ -1,0 +1,4 @@
+## 2026-06-26 - Path Traversal Vulnerability Fix
+**Vulnerability:** A path traversal vulnerability existed in `juniper_crawler.py` where the device hostname, which is parsed directly from the device output, was used in `backup_filename` without sanitization. A malicious device could use a hostname like `../../../etc/cron.d/malicious` to write configuration backups to arbitrary system directories.
+**Learning:** External or remote input, even from seemingly trusted infrastructure devices like switches, should never be trusted and directly used in file system operations. Hostnames could be spoofed or maliciously set.
+**Prevention:** Always sanitize any remote input before using it to construct file paths. Specifically, filter out directory traversal characters such as `/` and `\`.

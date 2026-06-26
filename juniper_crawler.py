@@ -328,6 +328,7 @@ def crawl_device(ip, ports, username, password, timestamp):
             f.write(sh_config)
             
         filename_hostname = device_data["hostname"] or ip
+        filename_hostname = filename_hostname.replace("/", "_").replace("\\", "_")
         backup_filename = f"{filename_hostname}_backup_{timestamp}.cfg"
         with open(os.path.join(backups_dir, backup_filename), "w", encoding="utf-8") as f:
             f.write(sh_config)
