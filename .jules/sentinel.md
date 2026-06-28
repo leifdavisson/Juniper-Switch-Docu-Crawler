@@ -1,0 +1,4 @@
+## 2026-06-28 - Insecure File Fetching and File Permissions
+**Vulnerability:** Fetching the OUI database used an insecure `http://` URL, exposing the download to MITM attacks. Additionally, directories containing sensitive device configurations (including SNMP strings and local accounts) were created without restrictive permissions, making them readable by other users on the system.
+**Learning:** External resources should always be fetched over encrypted channels (`https://`). Directories or files intended to store sensitive network artifacts locally must enforce strict permissions (`0o700` or `0o600`) to prevent unauthorized local access.
+**Prevention:** Always use `https://` for external requests. Ensure that local directories and files storing sensitive information explicitly set restrictive file system permissions when created using `os.chmod()` or by setting the `umask`.
