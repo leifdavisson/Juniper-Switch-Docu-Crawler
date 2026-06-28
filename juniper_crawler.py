@@ -193,10 +193,13 @@ def crawl_device(ip, ports, username, password, timestamp):
     mgmt_method = None
     run_dir = os.path.join("outputs", f"juniper_run_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
+    os.chmod(run_dir, 0o700)
     raw_logs_dir = os.path.join(run_dir, RAW_LOGS_DIR)
     os.makedirs(raw_logs_dir, exist_ok=True)
+    os.chmod(raw_logs_dir, 0o700)
     backups_dir = os.path.join(run_dir, BACKUPS_DIR)
     os.makedirs(backups_dir, exist_ok=True)
+    os.chmod(backups_dir, 0o700)
 
     if 22 in ports:
         try:
@@ -446,6 +449,7 @@ def main():
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join("outputs", f"juniper_run_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
+    os.chmod(run_dir, 0o700)
 
     # Put the first host back into the queue so it gets crawled
     discovered_queue.put(first_host)
