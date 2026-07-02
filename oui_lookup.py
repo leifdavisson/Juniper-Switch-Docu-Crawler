@@ -403,7 +403,8 @@ def load_oui_file():
 
 def download_oui_db():
     """Downloads the official IEEE OUI registry for local offline use."""
-    url = "http://standards-oui.ieee.org/oui/oui.txt"
+    # [SECURITY] Use HTTPS instead of HTTP
+    url = "https://standards-oui.ieee.org/oui/oui.txt"
     print("Downloading IEEE OUI Registry (approx 5MB)...")
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})

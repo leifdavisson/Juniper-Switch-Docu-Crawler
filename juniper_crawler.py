@@ -4,6 +4,7 @@ import sys
 import json
 import argparse
 import getpass
+import re
 import socket
 import subprocess
 import xml.etree.ElementTree as ET
@@ -327,7 +328,9 @@ def crawl_device(ip, ports, username, password, timestamp):
         with open(os.path.join(raw_logs_dir, f"{ip}_configuration.cfg"), "w", encoding="utf-8") as f:
             f.write(sh_config)
             
+        # [SECURITY] Sanitize hostname to prevent path traversal
         filename_hostname = device_data["hostname"] or ip
+        filename_hostname = re.sub(r'[^a-zA-Z0-9_.-]', '_', filename_hostname)
         backup_filename = f"{filename_hostname}_backup_{timestamp}.cfg"
         with open(os.path.join(backups_dir, backup_filename), "w", encoding="utf-8") as f:
             f.write(sh_config)
