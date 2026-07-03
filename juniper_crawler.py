@@ -12,6 +12,7 @@ from netaddr import IPNetwork
 import time
 import queue
 import threading
+import re
 
 import oui_lookup
 import juniper_parser
@@ -327,7 +328,9 @@ def crawl_device(ip, ports, username, password, timestamp):
         with open(os.path.join(raw_logs_dir, f"{ip}_configuration.cfg"), "w", encoding="utf-8") as f:
             f.write(sh_config)
             
+        # Security: Prevent path traversal from malicious hostnames returned by the device
         filename_hostname = device_data["hostname"] or ip
+        filename_hostname = re.sub(r'[^a-zA-Z0-9_.-]', '_', filename_hostname)
         backup_filename = f"{filename_hostname}_backup_{timestamp}.cfg"
         with open(os.path.join(backups_dir, backup_filename), "w", encoding="utf-8") as f:
             f.write(sh_config)

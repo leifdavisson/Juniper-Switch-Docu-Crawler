@@ -1,0 +1,4 @@
+## 2026-07-03 - Prevent Path Traversal via Unsanitized Device Hostname
+**Vulnerability:** A critical path traversal vulnerability existed in `juniper_crawler.py` where the remote device's hostname (extracted from `show version`) was directly interpolated into the backup file path (`backup_filename = f"{filename_hostname}_backup_{timestamp}.cfg"`). A malicious or compromised switch could return a payload like `../../../../tmp/evil`, writing configuration backups to arbitrary system locations.
+**Learning:** External or device-provided input must never be implicitly trusted, even from ostensibly "internal" network equipment. Any parsed configuration data used in local file I/O operations requires strict validation and sanitization.
+**Prevention:** Implemented a regex sanitization routine (`re.sub(r'[^a-zA-Z0-9_.-]', '_', value)`) to ensure the extracted hostname only contains safe alphanumeric characters before using it in file path construction.
