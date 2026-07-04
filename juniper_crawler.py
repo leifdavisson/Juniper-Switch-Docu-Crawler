@@ -8,6 +8,7 @@ import socket
 import subprocess
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
 from netaddr import IPNetwork
 import time
 import queue
@@ -327,7 +328,8 @@ def crawl_device(ip, ports, username, password, timestamp):
         with open(os.path.join(raw_logs_dir, f"{ip}_configuration.cfg"), "w", encoding="utf-8") as f:
             f.write(sh_config)
             
-        filename_hostname = device_data["hostname"] or ip
+        raw_hostname = device_data["hostname"] or ip
+        filename_hostname = re.sub(r'[^a-zA-Z0-9_.-]', '_', raw_hostname)
         backup_filename = f"{filename_hostname}_backup_{timestamp}.cfg"
         with open(os.path.join(backups_dir, backup_filename), "w", encoding="utf-8") as f:
             f.write(sh_config)
