@@ -6,6 +6,7 @@ import argparse
 import getpass
 import socket
 import subprocess
+import re
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from netaddr import IPNetwork
@@ -188,6 +189,13 @@ def send_command_paced(conn, command, mgmt_method):
         time.sleep(0.5)
     return res
 
+def sanitize_filename(filename):
+    """Sanitizes strings to prevent path traversal in file paths."""
+    if not filename:
+        return ""
+    # Allow only alphanumeric, dash, underscore, and dot. Replace others with underscore.
+    return re.sub(r'[^\w\-\.]', '_', str(filename))
+
 def crawl_device(ip, ports, username, password, timestamp):
     conn = None
     mgmt_method = None
@@ -242,12 +250,14 @@ def crawl_device(ip, ports, username, password, timestamp):
     }
 
     try:
+        safe_ip = sanitize_filename(ip)
+
         # Disable CLI paging
         send_command_paced(conn, 'set cli screen-length 0', mgmt_method)
 
         # 1. Version information
         sh_ver = send_command_paced(conn, 'show version', mgmt_method)
-        with open(os.path.join(raw_logs_dir, f"{ip}_show_version.log"), "w", encoding="utf-8") as f:
+        with open(os.path.join(raw_logs_dir, f"{safe_ip}_show_version.log"), "w", encoding="utf-8") as f:
             f.write(sh_ver)
         ver_data = juniper_parser.parse_juniper_show_version(sh_ver)
         device_data.update(ver_data)
@@ -256,7 +266,7 @@ def crawl_device(ip, ports, username, password, timestamp):
 
         # 2. Chassis Hardware
         sh_hw = send_command_paced(conn, 'show chassis hardware', mgmt_method)
-        with open(os.path.join(raw_logs_dir, f"{ip}_show_chassis_hardware.log"), "w", encoding="utf-8") as f:
+        with open(os.path.join(raw_logs_dir, f"{safe_ip}_show_chassis_hardware.log"), "w", encoding="utf-8") as f:
             f.write(sh_hw)
         hw_data = juniper_parser.parse_juniper_chassis_hardware(sh_hw)
         if not device_data["model"] and hw_data.get("model"):
@@ -324,10 +334,10 @@ def crawl_device(ip, ports, username, password, timestamp):
         # 8. Configuration
         sh_config = send_command_paced(conn, 'show configuration | display set', mgmt_method)
         device_data["raw_config"] = sh_config
-        with open(os.path.join(raw_logs_dir, f"{ip}_configuration.cfg"), "w", encoding="utf-8") as f:
+        with open(os.path.join(raw_logs_dir, f"{safe_ip}_configuration.cfg"), "w", encoding="utf-8") as f:
             f.write(sh_config)
             
-        filename_hostname = device_data["hostname"] or ip
+        filename_hostname = sanitize_filename(device_data["hostname"] or ip)
         backup_filename = f"{filename_hostname}_backup_{timestamp}.cfg"
         with open(os.path.join(backups_dir, backup_filename), "w", encoding="utf-8") as f:
             f.write(sh_config)
