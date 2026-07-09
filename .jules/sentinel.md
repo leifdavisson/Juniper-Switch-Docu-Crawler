@@ -1,0 +1,4 @@
+## 2024-07-09 - Fix Path Traversal in log and config file generation
+**Vulnerability:** In `juniper_crawler.py`, hostnames and IPs read from network devices (which could potentially be untrusted or maliciously formed, e.g., `../../../etc/passwd` via hostname) are directly concatenated into file paths without any input validation or sanitization when generating logs and backups.
+**Learning:** External or untrusted inputs must never be used directly in file system operations. Even though these are network devices, compromised or malicious endpoints can exploit standard management workflows.
+**Prevention:** Always validate and sanitize user/device inputs before using them to construct paths. Whitelist safe characters (e.g. alphanumeric and underscores/dashes) using regular expressions (e.g. `re.sub(r'[^a-zA-Z0-9_\-]', '_', str(name))`).

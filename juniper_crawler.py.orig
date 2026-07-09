@@ -23,7 +23,7 @@ BACKUPS_DIR = "backups"
 
 def sanitize_filename(name):
     """Sanitizes strings to prevent path traversal vulnerabilities."""
-    return re.sub(r'[^a-zA-Z0-9_\-\.]', '_', str(name))
+    return re.sub(r'[^a-zA-Z0-9_\-]', '_', str(name))
 
 def get_local_ip_subnet():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -56,7 +56,7 @@ def run_nmap_scan_producer(subnets, discovered_queue, scanning_complete_event):
             print("Non-root environment detected. Falling back to Nmap TCP Connect scan (-sT)...")
             cmd = ["nmap", "-sT", "-p", "22,23", "-Pn", "-oX", xml_output] + subnets
             subprocess.run(cmd, check=True)
-        
+
         hosts = parse_nmap_xml(xml_output)
         for h in hosts:
             discovered_queue.put(h)
@@ -115,13 +115,13 @@ def run_python_port_scan_producer(subnets, discovered_queue, scanning_complete_e
     print("Nmap not found. Falling back to internal Python multi-threaded port scanner...")
     max_active_futures = 500
     futures = set()
-    
+
     with ThreadPoolExecutor(max_workers=50) as executor:
         for subnet in subnets:
             try:
                 net = IPNetwork(subnet)
                 hosts_iter = net.iter_hosts() if net.prefixlen < 31 else iter(net)
-                
+
                 for ip in hosts_iter:
                     ip_str = str(ip)
                     # Cap outstanding futures to avoid memory issues
@@ -134,19 +134,19 @@ def run_python_port_scan_producer(subnets, discovered_queue, scanning_complete_e
                                 print(f"  Discovered active host: {res['ip']} (Open ports: {res['ports']})")
                         futures -= completed
                         time.sleep(0.01)
-                    
+
                     futures.add(executor.submit(python_port_scan_worker, ip_str, [22, 23]))
-                    
+
             except Exception as e:
                 print(f"Invalid subnet range ignored: {subnet} ({e})")
-        
+
         # Wait for all remaining futures to complete
         for f in as_completed(futures):
             res = f.result()
             if res:
                 discovered_queue.put(res)
                 print(f"  Discovered active host: {res['ip']} (Open ports: {res['ports']})")
-                
+
     scanning_complete_event.set()
 
 def connect_to_device(ip, username, password, conn_type="ssh"):
@@ -332,7 +332,7 @@ def crawl_device(ip, ports, username, password, timestamp):
         device_data["raw_config"] = sh_config
         with open(os.path.join(raw_logs_dir, f"{safe_ip}_configuration.cfg"), "w", encoding="utf-8") as f:
             f.write(sh_config)
-            
+
         filename_hostname = sanitize_filename(device_data["hostname"] or ip)
         backup_filename = f"{filename_hostname}_backup_{timestamp}.cfg"
         with open(os.path.join(backups_dir, backup_filename), "w", encoding="utf-8") as f:
@@ -431,7 +431,7 @@ def main():
     # Wait for the first host to be discovered (or scanning to complete if nothing found)
     if not targets_loaded_directly:
         print("Scanning and waiting for the first active host to be discovered...")
-    
+
     first_host = None
     while not scanning_complete_event.is_set() or not discovered_queue.empty():
         try:
@@ -458,7 +458,7 @@ def main():
 
     with ThreadPoolExecutor(max_workers=10) as crawler_executor:
         crawler_futures = []
-        
+
         while not scanning_complete_event.is_set() or not discovered_queue.empty():
             try:
                 t = discovered_queue.get(timeout=0.1)
