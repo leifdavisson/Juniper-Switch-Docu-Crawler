@@ -1,0 +1,4 @@
+## 2023-10-27 - Path Traversal Vulnerability in File Path Construction
+**Vulnerability:** Untrusted network device outputs (hostnames, IPs) were being used directly to construct file paths for logs and backups without any sanitization. This allowed for potential path traversal attacks if a device returned malicious input (e.g., `../../../etc/passwd` as a hostname).
+**Learning:** File paths constructed using external, untrusted inputs are a common source of path traversal vulnerabilities and must always be sanitized. We cannot trust data retrieved from external devices, even if they are assumed to be managed network switches.
+**Prevention:** Always explicitly sanitize external device-provided inputs before using them in file path construction. Use an allowlist regex pattern like `[^a-zA-Z0-9_\-\.]` to restrict allowed characters while keeping legitimate inputs (like IPv4 addresses) intact.
