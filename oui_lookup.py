@@ -403,10 +403,14 @@ def load_oui_file():
 
 def download_oui_db():
     """Downloads the official IEEE OUI registry for local offline use."""
-    url = "http://standards-oui.ieee.org/oui/oui.txt"
+    # SECURITY: Using HTTPS instead of HTTP to prevent Man-in-the-Middle (MitM) attacks
+    # and ensure data integrity during download.
+    url = "https://standards-oui.ieee.org/oui/oui.txt"
     print("Downloading IEEE OUI Registry (approx 5MB)...")
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        # SECURITY: Using 'curl/8.5.0' instead of 'Mozilla/5.0' as the server blocks
+        # standard browser User-Agents with a 418 I'm a teapot error.
+        req = urllib.request.Request(url, headers={'User-Agent': 'curl/8.5.0'})
         with urllib.request.urlopen(req) as response, open(OUI_FILE, 'wb') as out_file:
             out_file.write(response.read())
         print(f"IEEE OUI database successfully saved to {OUI_FILE}")
